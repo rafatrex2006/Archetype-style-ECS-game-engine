@@ -25,6 +25,7 @@ typedef enum Component {
     TRANSFORM = 0,
     VELOCITY,
     HEALTH,
+    ACCELERATION,
 
     COMPONENT_COUNT
 } Component;

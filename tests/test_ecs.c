@@ -7,6 +7,7 @@
 #include "components/transform.h"
 #include "components/velocity.h"
 #include "components/health.h"
+#include "components/acceleration.h"
 #include "metadata/metadata.h"
 
 static int failures = 0;
