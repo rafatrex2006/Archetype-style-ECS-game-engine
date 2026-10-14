@@ -1,4 +1,4 @@
-# DANT
+# ECS-game-engine
 
 An archetype-based Entity Component System (ECS) written in C, intended as the core of a small game engine. Built from scratch as a learning project, with SDL3 for windowing.
 
