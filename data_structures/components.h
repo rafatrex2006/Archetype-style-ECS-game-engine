@@ -26,6 +26,7 @@ typedef enum Component {
     VELOCITY,
     HEALTH,
     ACCELERATION,
+    SHAPE,
 
     COMPONENT_COUNT
 } Component;

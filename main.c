@@ -10,26 +10,10 @@
 int main(int argc, char *argv[])
 {
 
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        SDL_Log("SDL_Init failed: %s", SDL_GetError());
-        return 1;
-    }
+    FRX_renderer* renderer= FRX_CreateRenderer();
 
-    SDL_Window *window = SDL_CreateWindow("SDL3 Window", 800, 600, SDL_WINDOW_RESIZABLE);
-
-    if (!window) {
-        SDL_Log("Window creation failed: %s", SDL_GetError());
-        SDL_Quit();
-        return 1;
-    }
-
-    SDL_Renderer *renderer = SDL_CreateRenderer(window, NULL);
-
-    if (!renderer) {
-        SDL_Log("Renderer failed: %s", SDL_GetError());
-        SDL_DestroyWindow(window);
-        SDL_Quit();
-        return 1;
+    if(!renderer){
+        return 0;
     }
 
     metadata *meta = createMetadata(64);
@@ -52,16 +36,11 @@ int main(int argc, char *argv[])
             }
         }
 
-
-        SDL_RenderPresent(renderer);
+        FRX_UpdateRenderer(renderer);
     }
+    //Cleanup
     freeWorld(World);
     freeMetadata(meta);
-
-    // Cleanup
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
-    SDL_Quit();
-
+    FRX_DestroyRenderer(renderer);
     return 0;
 }

@@ -1,4 +1,4 @@
-#include "Acceleration.h"
+#include "acceleration.h"
 
 #include <stdlib.h>
 

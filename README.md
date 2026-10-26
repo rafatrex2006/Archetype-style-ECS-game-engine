@@ -2,7 +2,7 @@
 
 An archetype-based Entity Component System (ECS) written in C, intended as the core of a small game engine. Built from scratch as a learning project, with SDL3 for windowing.
 
-> **Status: early development.** The ECS core works and is tested. Systems, a scheduler, and the renderer are not built yet (see [Roadmap](#roadmap)).
+> **Status: early development.** The ECS core works and is tested, and systems run through a phase-based scheduler. The renderer is not built yet (see [Roadmap](#roadmap)).
 
 ## What it does today
 
@@ -14,11 +14,39 @@ An archetype-based Entity Component System (ECS) written in C, intended as the c
 - **Component metadata.** Each component type registers its size, alignment, and optional constructor, destructor, and move hooks. Plain structs need only a constructor.
 - **No global state.** Everything hangs off a `World`.
 
+## Systems
+
+A system is a function that runs every frame and works on the world, usually by iterating a query. Systems are registered with a `SystemDesc`:
+
+- `name`: used in error messages.
+- `phase`: when the system runs (see below).
+- `init` (optional): runs once and returns the system's own state, such as its queries or settings. Return `NULL` if the system needs none.
+- `update`: runs every frame and receives the world, the frame's `dt`, and the state from `init`.
+- `destroy` (optional): frees the state. If it is left out, the registry calls `free(state)`.
+
+Each frame, `systems_run` goes through the phases in order: `PRE_UPDATE`, `UPDATE`, `POST_UPDATE`, `RENDER`. Inside a phase, systems run in the order they were registered. A system can be switched off and on with `set_system_enabled`.
+
+```c
+void move_update(World *W, float dt, void *state) {
+    // iterate a Transform + Velocity query and apply velocity
+}
+
+SystemDesc move = { .name = "move", .phase = PHASE_UPDATE, .update = move_update };
+int id = register_system(R, &move);   // returns the system id, or -1 on bad input
+
+systems_init(R);           // once, before the main loop
+systems_run(R, dt);        // every frame
+freeSystemRegistry(R);     // runs destroy on every system, in reverse order
+```
+
+A system registered after `systems_init` has run is initialized right away.
+
 ## Project layout
 
 ```
 data_structures/   world, archetypes, archetype hash table, archetype array, queries
 metadata/          component registration (size, alignment, constructor/destructor/move)
+System_Handler/    system registry and phase scheduler
 components/        example components: Transform, Velocity, Health
 renderer/          SDL3 window (work in progress)
 tests/             test_ecs.c
@@ -81,7 +109,7 @@ archetype_array *q = createCustomQueue(W, in, 2, out, 1);   // has Transform + V
 
 ## Roadmap
 
-- [ ] Systems and a phase-based scheduler (startup / input / update / render)
+- [x] Systems and a phase-based scheduler (startup / input / update / render)
 - [ ] Modules: one function that registers a feature's components and systems
 - [ ] Runtime component registration instead of a hard-coded list in `createMetadata`
 - [ ] Command buffer for deferred structural changes
