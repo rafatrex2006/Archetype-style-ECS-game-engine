@@ -144,7 +144,6 @@ archetype_array *q = createCustomQueue(W, in, 2, out, 1);   // has Transform + V
 - At most 64 component types (one bit each in the signature).
 - Entity IDs are not recycled and have no generation counter, so stale handles are not detected.
 - Adding, removing, or destroying components while iterating a query is unsafe. A command buffer is planned.
-- The main loop passes `dt = 0` for now; a real frame time is not measured yet.
 - Each `Surface` gets its own texture, even when entities share the same image. Textures are only freed when the renderer is destroyed, so removing a `Surface` component or destroying its entity keeps the texture alive until shutdown.
 - Images are drawn at native size; there is no scaling, rotation, or draw order beyond "shapes, then surfaces".
 - Not thread-safe.
@@ -154,7 +153,7 @@ archetype_array *q = createCustomQueue(W, in, 2, out, 1);   // has Transform + V
 - [x] Systems and a phase-based scheduler (pre-update / update / post-update / render)
 - [x] Systems owned by the `World` (`register_system_world`, `world_init_systems`, `UpdateWorld`)
 - [x] Basic renderer: shapes and PNG images through `Shape` and `Surface` components
-- [ ] Real `dt` from the frame clock in the main loop
+- [x] Real `dt` from the frame clock in the main loop (`SDL_GetTicksNS`)
 - [ ] Shared texture cache so entities using the same image share one texture
 - [ ] Renderable component (layer, size, flags) and a `Hidden` tag
 - [ ] Tests for the scheduler

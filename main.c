@@ -43,6 +43,7 @@ int main(int argc, char *argv[])
     world_init_systems(World);
     
     bool running = true;
+    Uint64 last = SDL_GetTicksNS();
     SDL_Event event;
 
     //SDL_FRect rect = {300, 200, 200, 100};
@@ -52,7 +53,9 @@ int main(int argc, char *argv[])
     // Main loop
     while (running) {
         //SDL_GetMouseState(&x, &y);
-        UpdateWorld(World, 0); //0 should be changed to time later
+        Uint64 now = SDL_GetTicksNS();
+        UpdateWorld(World, (now - last) / 1e9f); // dt in seconds
+        last = now;
         // Handle events
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_EVENT_QUIT) {
