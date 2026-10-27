@@ -22,12 +22,6 @@ void freeMetadata(metadata *meta){
 
 
 //include components
-#include "components/transform.h"
-#include "components/velocity.h"
-#include "components/health.h"
-#include "components/acceleration.h"
-#include "components/render_simple.h"
-
 
 metadata *createMetadata(int n){
     metadata *M = (metadata*)malloc(sizeof(metadata));
@@ -47,6 +41,7 @@ metadata *createMetadata(int n){
     assign_new_component(M, sizeof(Health), HEALTH, alignof(Health), createHealth, NULL, NULL);
     assign_new_component(M, sizeof(Acceleration), ACCELERATION, alignof(Acceleration), createAcceleration, NULL, NULL);
     assign_new_component(M, sizeof(Shape), SHAPE, alignof(Shape), createShape, NULL, NULL);
+    assign_new_component(M, sizeof(Surface), SURFACE, alignof(Surface), createSurface, NULL, NULL);
 
     
 

@@ -1,5 +1,5 @@
 #include "render_simple.h"
-
+#include <stdbool.h>
 #include <stdlib.h>
 
 void createShape(void *dst){

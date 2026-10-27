@@ -2,7 +2,8 @@
 #define system_handler_H
 
 #include <stdbool.h>
-#include "data_structures/World.h"
+//forward declared to avoid a circular include, World.h includes this header
+typedef struct World World;
 
 //phases run in this order every frame, systems inside a phase run in registration order
 typedef enum SystemPhase {

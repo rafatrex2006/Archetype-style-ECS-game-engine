@@ -3,6 +3,7 @@
 
 
 #include <stdlib.h>
+#include "metadata/metadata.h"  //Component enum
 
 //forward declarations
 typedef unsigned long long int signature;
@@ -19,18 +20,6 @@ typedef struct ComponentColumn
     void *data;
     size_t DataSize;
 } ComponentColumn;
-
-
-typedef enum Component {
-    TRANSFORM = 0,
-    VELOCITY,
-    HEALTH,
-    ACCELERATION,
-    SHAPE,
-
-    COMPONENT_COUNT
-} Component;
-
 
 
 #endif
