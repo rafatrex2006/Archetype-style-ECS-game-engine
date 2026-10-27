@@ -25,6 +25,19 @@ int main(int argc, char *argv[])
     metadata *meta = createMetadata(64);
     World *World = createWorld(20, 100, meta, window);
     register_system_world(World, &(SystemDesc){.name    = "renderer", .phase   = PHASE_RENDER, .init    = FRX_CreateRenderer, .update  = FRX_UpdateRenderer, .destroy = FRX_DestroyRenderer});
+    
+    SDL_Surface *fade = SDL_LoadPNG("fade.png");
+    if (!fade) {
+        SDL_Log("Could not load fade.png: %s", SDL_GetError());
+    }
+
+    entity *box = CreateEntity(World);
+    add_component(World, box, TRANSFORM, &(Transform){50, 50});
+    add_component(World, box, SHAPE, &(Shape){.type = SHAPE_RECT, .color = {1, 0, 0, 1}, .filled = true, .rect = {200, 100}});
+
+    entity *sprite = CreateEntity(World);
+    add_component(World, sprite, TRANSFORM, &(Transform){100, 100});
+    add_component(World, sprite, SURFACE, &(Surface){.surface = fade});
 
     
     world_init_systems(World);
@@ -52,5 +65,6 @@ int main(int argc, char *argv[])
     freeMetadata(meta);
     SDL_DestroyWindow(window);
     SDL_Quit();
+    SDL_DestroySurface(fade);
     return 0;
 }
