@@ -25,7 +25,8 @@ void freeWorld(World *W);
 int register_system_world(World *W, const SystemDesc *desc);
 
 //runs init on every registered system, systems registered after this are initialized right away
-void world_init_systems(World *W);
+//returns false if any system failed to start, those are disabled and the rest still run
+bool world_init_systems(World *W);
 
 void UpdateWorld(World *W, float dt);
 

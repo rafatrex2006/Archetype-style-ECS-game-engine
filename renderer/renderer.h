@@ -21,7 +21,7 @@ typedef struct FRX_renderer{
     archetype_array *query[QUERY_COUNT];
 } FRX_renderer;
 
-void *FRX_CreateRenderer(World *W);
+bool FRX_CreateRenderer(World *W, void **state);
 
 void FRX_DestroyRenderer(World *W, void *state);
 

@@ -23,6 +23,9 @@ void freeSystemRegistry(SystemRegistry *R){
     //reverse order so later systems can still rely on earlier ones while cleaning up
     for(int i = R->n - 1; i >= 0; i--){
         System *s = &R->systems[i];
+        if(s->failed){
+            continue;   //init already cleaned up after itself
+        }
         if(s->desc.destroy){
             s->desc.destroy(R->W, s->state);
         }
@@ -39,8 +42,22 @@ static void DoubleSystemSize(SystemRegistry *R){
     R->systems = realloc(R->systems, R->size*sizeof(System));
 }
 
-static void InitSystem(SystemRegistry *R, System *s){
-    s->state = s->desc.init ? s->desc.init(R->W) : NULL;
+//works by index, init may register more systems and realloc R->systems under us
+static bool InitSystem(SystemRegistry *R, int id){
+    SystemInitFn init = R->systems[id].desc.init;
+    void *state = NULL;
+    bool ok = init ? init(R->W, &state) : true;
+
+    System *s = &R->systems[id];
+    if(!ok){
+        fprintf(stderr, "systems_init: system '%s' failed to start, it is disabled\n", s->desc.name ? s->desc.name : "?");
+        s->state = NULL;
+        s->enabled = false;
+        s->failed = true;
+        return false;
+    }
+    s->state = state;
+    return true;
 }
 
 int register_system(SystemRegistry *R, const SystemDesc *desc){
@@ -56,23 +73,31 @@ int register_system(SystemRegistry *R, const SystemDesc *desc){
     s->desc = *desc;
     s->state = NULL;
     s->enabled = true;
+    s->failed = false;
+    int id = R->n++;
 
     //registered after systems_init already ran, so init it right away
-    if(R->initialized){
-        InitSystem(R, s);
+    if(R->initialized && !InitSystem(R, id)){
+        return -1;
     }
 
-    return R->n++;
+    return id;
 }
 
-void systems_init(SystemRegistry *R){
+bool systems_init(SystemRegistry *R){
     if(R->initialized){
-        return;
+        return true;
     }
-    for(int i = 0; i < R->n; i++){
-        InitSystem(R, &R->systems[i]);
-    }
+    //set first, so systems registered by an init below are initialized by register_system
     R->initialized = true;
+    int n = R->n;
+    bool ok = true;
+    for(int i = 0; i < n; i++){
+        if(!InitSystem(R, i)){
+            ok = false;
+        }
+    }
+    return ok;
 }
 
 void systems_run(SystemRegistry *R, float dt){
@@ -87,7 +112,7 @@ void systems_run(SystemRegistry *R, float dt){
 }
 
 void set_system_enabled(SystemRegistry *R, int id, bool enabled){
-    if(id < 0 || id >= R->n){
+    if(id < 0 || id >= R->n || R->systems[id].failed){
         return;
     }
     R->systems[id].enabled = enabled;

@@ -1,169 +1,133 @@
 # ECS-game-engine
 
-An archetype-based Entity Component System (ECS) written in C, intended as the core of a small game engine. Built from scratch as a learning project, with SDL3 for windowing and rendering.
+An archetype-based Entity Component System (ECS) in C, built from scratch as a learning project and meant to become the core of a small game engine. SDL3 handles the window and rendering.
 
-> **Status: early development.** The ECS core works and is tested, systems run through a phase-based scheduler owned by the `World`, and a first renderer system draws shapes and PNG images (see [Roadmap](#roadmap)).
+> **Status: early development.** The ECS core, the system scheduler and a basic renderer (shapes and PNG images) work and are tested.
 
-## What it does today
+## Features
 
-- **Archetype storage.** Entities with the same set of component types share an archetype. Each archetype stores its components in contiguous per-component arrays (structure-of-arrays), so iterating one component type is cache-friendly.
-- **Bitmask signatures.** An archetype is identified by a 64-bit signature, one bit per component type. Column lookup uses popcount on the bits below a component's bit.
-- **Add/remove components at runtime.** Adding or removing a component moves the entity to the matching archetype and fills the hole it leaves with the last row (swap-remove), keeping every entity's stored index consistent.
-- **Archetype hash table.** Archetypes are looked up by signature in an open-addressing hash table and created on demand.
-- **Cached queries.** A query is a set of required components plus optional excluded components. Matching archetypes are cached, and new archetypes are added to existing queries when they are created.
-- **Component metadata.** Each component type registers its size, alignment, and optional constructor, destructor, and move hooks. Plain structs need only a constructor.
-- **Systems and phases.** The `World` owns a system registry. Systems run once per frame, phase by phase.
-- **Renderer.** A render system draws every entity that has a `Transform` plus a `Shape` (rectangles, lines, points) or a `Surface` (an image, such as a PNG).
-- **No global state.** Everything hangs off a `World`.
+- **Archetype storage:** entities with the same components share an archetype, and each component type is stored in its own contiguous array, so iterating it is cache-friendly.
+- **Runtime add/remove:** adding or removing a component moves the entity to the matching archetype.
+- **Cached queries:** "has these components, not those" queries stay up to date as new archetypes appear.
+- **Systems:** functions that run every frame, in phases, owned by the `World`.
+- **Renderer:** draws entities that have a `Transform` plus a `Shape` or a `Surface` (image).
+- **No global state:** everything lives in a `World`.
 
-## Systems
+## Build and run
 
-A system is a function that runs every frame and works on the world, usually by iterating a query. Systems are registered with a `SystemDesc`:
-
-- `name`: used in error messages.
-- `phase`: when the system runs (see below).
-- `init` (optional): runs once and returns the system's own state, such as its queries or settings. Return `NULL` if the system needs none.
-- `update`: runs every frame and receives the world, the frame's `dt` (seconds since the last frame), and the state from `init`.
-- `destroy` (optional): frees the state. If it is left out, the registry calls `free(state)`.
-
-Each frame, the phases run in order: `PRE_UPDATE`, `UPDATE`, `POST_UPDATE`, `RENDER`. Inside a phase, systems run in the order they were registered. A system can be switched off and on with `set_system_enabled`.
-
-The registry lives in the `World`, so you go through the World's functions:
-
-```c
-void move_update(World *W, float dt, void *state) {
-    // iterate a Transform + Velocity query and apply velocity * dt
-}
-
-int id = register_system_world(W, &(SystemDesc){
-    .name = "move", .phase = PHASE_UPDATE, .update = move_update,
-});                                // returns the system id, or -1 on bad input
-
-world_init_systems(W);             // once, before the main loop: runs every init
-UpdateWorld(W, dt);                // every frame: runs every phase
-freeWorld(W);                      // runs destroy on every system first, in reverse order
-```
-
-Registering a system only records it. Its `init` runs in `world_init_systems`, so every system's `init` can rely on the World being fully set up and on earlier systems already being initialized. A system registered after `world_init_systems` has run is initialized right away.
-
-## Rendering
-
-The renderer in `renderer/` is a regular system in the `RENDER` phase. `main` creates the SDL window and passes it to `createWorld`. The renderer's `init` creates the `SDL_Renderer` for that window and two queries:
-
-- **`Transform + Shape`.** A `Shape` is a rectangle (`rect.w`, `rect.h`, filled or outlined), a line (`line.end`, an offset from the Transform), or a point, drawn in its `color`.
-- **`Transform + Surface`.** A `Surface` holds an `SDL_Surface` loaded from an image file. The first time the renderer draws it, the renderer turns it into a GPU texture and keeps that texture in the component, so later frames don't upload the image again. Images are drawn at their native size.
-
-Each frame the renderer clears the screen, draws shapes, then draws surfaces on top, and presents.
-
-```c
-SDL_Surface *img = SDL_LoadPNG("fade.png");   // load once; entities can share it
-
-entity *box = CreateEntity(W);
-add_component(W, box, TRANSFORM, &(Transform){50, 50});
-add_component(W, box, SHAPE, &(Shape){
-    .type = SHAPE_RECT, .color = {1, 0, 0, 1}, .filled = true, .rect = {200, 100},
-});
-
-entity *sprite = CreateEntity(W);
-add_component(W, sprite, TRANSFORM, &(Transform){100, 100});
-add_component(W, sprite, SURFACE, &(Surface){ .surface = img });
-
-// ... main loop ...
-
-freeWorld(W);              // destroys the renderer, and with it every texture
-SDL_DestroySurface(img);   // the surface belongs to you; free it after the World
-```
-
-## Adding a component
-
-1. Write the struct and a constructor (`void createX(void *dst)`) in `components/`.
-2. Add an id to the `Component` enum in `metadata/metadata.h`, before `COMPONENT_COUNT`, and include the component's header there.
-3. Register it in `createMetadata` (`metadata/metadata.c`) with `assign_new_component`.
-
-## Project layout
-
-```
-data_structures/   world, archetypes, archetype hash table, archetype array, queries
-metadata/          Component enum and component registration (size, alignment, hooks)
-System_Handler/    system registry and phase scheduler
-components/        Transform, Velocity, Acceleration, Health, Shape, Surface
-renderer/          render system: SDL renderer, shape and surface drawing
-tests/             test_ecs.c
-main.c             SDL3 entry point: window, World, main loop
-run.sh             builds and runs the SDL3 app
-Makefile           builds and runs the tests
-```
-
-## Building
-
-Run the tests (needs a C compiler and the SDL3 headers; builds with AddressSanitizer and UBSan):
+You need a C compiler, `pkg-config` and SDL 3.4 or newer.
 
 ```sh
-make test
+make test   # runs the tests with AddressSanitizer and UBSan
+./run.sh    # builds and runs the app; run it from the project root so fade.png is found
 ```
 
-Build and run the SDL3 app (needs SDL 3.4 or newer for `SDL_LoadPNG`, and `pkg-config`). Run it from the project root so relative image paths like `fade.png` resolve:
-
-```sh
-./run.sh
-```
-
-## Usage sketch
+## Quick start
 
 ```c
 metadata *m = createMetadata(64);
-World *W = createWorld(20, 100, m, window);   // window can be NULL when nothing renders, e.g. in tests
+World *W = createWorld(20, 100, m, window);   // window can be NULL if nothing is drawn
 
-entity *e = CreateEntity(W);
-Transform t = {10.0f, 20.0f};
-add_component(W, e, TRANSFORM, &t);   // copy initial data in
-add_component(W, e, HEALTH, NULL);    // NULL runs the component's constructor
+// systems
+register_system_world(W, &ACCELERATE_SYSTEM);
+register_system_world(W, &MOVE_SYSTEM);
 
-remove_component(W, e, HEALTH);
-DestroyEnt(W, e);
+// entities
+entity *box = CreateEntity(W);
+add_component(W, box, TRANSFORM, &(Transform){50, 50});          // copy initial data in
+add_component(W, box, VELOCITY, &(Velocity){20, 0});
+add_component(W, box, SHAPE, &(Shape){
+    .type = SHAPE_RECT, .color = {1, 0, 0, 1}, .filled = true, .rect = {200, 100},
+});
+add_component(W, box, HEALTH, NULL);                             // NULL uses the default values
+
+if (!world_init_systems(W)) { /* a system failed to start */ }
+
+while (running) {
+    UpdateWorld(W, dt);   // dt = seconds since the last frame
+}
 
 freeWorld(W);
 freeMetadata(m);
 ```
 
-Querying:
+## Systems
+
+A system is described by a `SystemDesc`:
+
+| Field | What it does |
+|---|---|
+| `name` | Shown in error messages. |
+| `phase` | `PHASE_PRE_UPDATE`, `PHASE_UPDATE`, `PHASE_POST_UPDATE` or `PHASE_RENDER`. Phases run in that order, and systems in the same phase run in registration order. |
+| `init` | Optional. `bool init(World *W, void **state)` sets up the system's state (usually its queries) and returns `false` if the system can't start. |
+| `update` | `void update(World *W, float dt, void *state)` runs every frame. |
+| `destroy` | Optional. Frees the state. If left out, `free(state)` is called. |
+
+Things to know:
+
+- `init` runs in `world_init_systems`, not when the system is registered. A system registered later is initialized right away.
+- A system whose `init` fails is switched off: it never runs and is never destroyed, so `init` must clean up after itself.
+- `freeWorld` destroys systems first, in reverse order, so `destroy` can still use the World.
+- Queries belong to the World. Don't use a query by itself as a system's state, because the default `free(state)` would free it twice. Wrap it in a struct, as `systems/movement.c` does.
+
+## Rendering
+
+The renderer is a system in the `RENDER` phase. Each frame it clears the screen, draws shapes, draws images on top, and presents.
+
+- **`Shape`:** a rectangle (filled or outlined), a line (`line.end` is an offset from the Transform) or a point, in a `color`.
+- **`Surface`:** an image. Load it once (`SDL_LoadPNG`) and share it between entities. The renderer turns it into a texture the first time it draws it. The image is yours to free, after `freeWorld`.
 
 ```c
-Component in[]  = { TRANSFORM, VELOCITY };
-Component out[] = { HEALTH };
-archetype_array *q = createCustomQueue(W, in, 2, out, 1);   // has Transform + Velocity, no Health
-// q->arcs[i] are the matching archetypes; iterate their component columns.
+SDL_Surface *img = SDL_LoadPNG("fade.png");
+add_component(W, sprite, SURFACE, &(Surface){ .surface = img });
+// ...
+freeWorld(W);
+SDL_DestroySurface(img);
 ```
 
-## Tests
+## Adding a component
 
-`tests/test_ecs.c` covers adding and removing components, swap-remove index consistency, destructor counts, growth to thousands of entities, and the query cache including exclusion filters. These test the ECS bookkeeping; they do not yet cover the scheduler or rendering.
+1. Write the struct and a `createX(void *dst)` function that sets default values, in `components/`.
+2. Add its id to the `Component` enum in `metadata/metadata.h` (before `COMPONENT_COUNT`) and include its header there.
+3. Register it in `createMetadata` in `metadata/metadata.c`.
+
+## Project layout
+
+```
+data_structures/   World, archetypes, hash table, queries
+metadata/          Component enum and component registration
+System_Handler/    system registry and phase scheduler
+systems/           example systems: accelerate and move
+components/        Transform, Velocity, Acceleration, Health, Shape, Surface
+renderer/          render system
+tests/             test_ecs.c: ECS core and scheduler tests
+main.c             window, World and main loop
+```
 
 ## Known limitations
 
-- At most 64 component types (one bit each in the signature).
-- Entity IDs are not recycled and have no generation counter, so stale handles are not detected.
-- Adding, removing, or destroying components while iterating a query is unsafe. A command buffer is planned.
-- Each `Surface` gets its own texture, even when entities share the same image. Textures are only freed when the renderer is destroyed, so removing a `Surface` component or destroying its entity keeps the texture alive until shutdown.
-- Images are drawn at native size; there is no scaling, rotation, or draw order beyond "shapes, then surfaces".
+- At most 64 component types.
+- Entity handles are not checked: using a destroyed entity is not detected.
+- Adding or removing components while iterating a query is unsafe.
+- Each `Surface` gets its own texture, freed only when the renderer shuts down.
+- Images are drawn at their original size, with no scaling, rotation or layers.
 - Not thread-safe.
 
 ## Roadmap
 
-- [x] Systems and a phase-based scheduler (pre-update / update / post-update / render)
-- [x] Systems owned by the `World` (`register_system_world`, `world_init_systems`, `UpdateWorld`)
-- [x] Basic renderer: shapes and PNG images through `Shape` and `Surface` components
-- [x] Real `dt` from the frame clock in the main loop (`SDL_GetTicksNS`)
-- [ ] Shared texture cache so entities using the same image share one texture
+- [x] Phase-based system scheduler owned by the `World`
+- [x] Basic renderer: shapes and PNG images
+- [x] Real frame time (`dt`) in the main loop
+- [x] Scheduler tests
+- [ ] Shared texture cache
 - [ ] Renderable component (layer, size, flags) and a `Hidden` tag
-- [ ] Tests for the scheduler
 - [ ] Modules: one function that registers a feature's components and systems
-- [ ] Runtime component registration instead of a hard-coded list in `createMetadata`
-- [ ] Command buffer for deferred structural changes
+- [ ] Runtime component registration
+- [ ] Command buffer for safe add/remove during iteration
 - [ ] Entity generations to detect stale handles
 - [ ] Event bus
-- [ ] Multithreaded system execution
-- [ ] Demo and a benchmark (archetype iteration vs. array of pointers)
+- [ ] Multithreaded systems
+- [ ] Demo and benchmark
 
 ## Notes
 

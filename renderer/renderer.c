@@ -6,27 +6,28 @@
 //column index = number of component bits below this one
 #define COLUMN(arc, comp) ((arc)->data[__builtin_popcountll((arc)->sig & ((1ULL << (comp)) - 1))].data)
 
-void *FRX_CreateRenderer(World *W){
+bool FRX_CreateRenderer(World *W, void **state){
 
     SDL_Renderer *renderer = SDL_CreateRenderer(W->window, NULL);
 
     //main owns the window, so only report the error here
     if (!renderer) {
         SDL_Log("Renderer failed: %s", SDL_GetError());
-        return NULL;
+        return false;
     }
 
     FRX_renderer *rd = (FRX_renderer*)malloc(sizeof(FRX_renderer));
     if (!rd) {
         SDL_DestroyRenderer(renderer);
-        return NULL;
+        return false;
     }
     rd->window = W->window;
     rd->renderer = renderer;
     rd->query[QUERY_SHAPE] = createCustomQueue(W, (Component[]){TRANSFORM, SHAPE}, 2, NULL, 0);
     rd->query[QUERY_SURFACE] = createCustomQueue(W, (Component[]){TRANSFORM, SURFACE}, 2, NULL, 0);
 
-    return rd;
+    *state = rd;
+    return true;
 }
 
 void FRX_DestroyRenderer(World *W, void *state){

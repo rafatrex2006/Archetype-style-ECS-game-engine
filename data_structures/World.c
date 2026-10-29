@@ -26,8 +26,8 @@ int register_system_world(World *W, const SystemDesc *desc){
     return register_system(W->systems, desc);
 }
 
-void world_init_systems(World *W){
-    systems_init(W->systems);
+bool world_init_systems(World *W){
+    return systems_init(W->systems);
 }
 
 void UpdateWorld(World *W, float dt){

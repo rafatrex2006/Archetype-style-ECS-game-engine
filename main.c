@@ -40,9 +40,11 @@ int main(int argc, char *argv[])
     add_component(World, sprite, SURFACE, &(Surface){.surface = fade});
 
     
-    world_init_systems(World);
-    
-    bool running = true;
+    //skip the loop and clean up if a system (like the renderer) failed to start
+    bool running = world_init_systems(World);
+    if (!running) {
+        SDL_Log("A system failed to start, quitting");
+    }
     Uint64 last = SDL_GetTicksNS();
     SDL_Event event;
 

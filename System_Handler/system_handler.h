@@ -15,8 +15,9 @@ typedef enum SystemPhase {
     PHASE_COUNT
 } SystemPhase;
 
-//init mallocs the system's own state (queries, settings, subscribers...) and returns it, NULL is fine for stateless systems
-typedef void *(*SystemInitFn)(World *W);
+//init mallocs the system's own state (queries, settings, subscribers...) and writes it to *state, leave it NULL for stateless systems
+//returns false if the system could not start, it must clean up after itself then, destroy is not called for it
+typedef bool (*SystemInitFn)(World *W, void **state);
 typedef void (*SystemUpdateFn)(World *W, float dt, void *state);
 //frees whatever init created, if NULL the registry just calls free(state)
 typedef void (*SystemDestroyFn)(World *W, void *state);
@@ -31,8 +32,9 @@ typedef struct SystemDesc {
 
 typedef struct System {
     SystemDesc desc;
-    void *state;    //whatever init returned
+    void *state;    //whatever init wrote
     bool enabled;
+    bool failed;    //init returned false, the system never runs and is never destroyed
 } System;
 
 typedef struct SystemRegistry {
@@ -49,13 +51,15 @@ SystemRegistry *createSystemRegistry(World *W, int size);
 //calls destroy on every system
 void freeSystemRegistry(SystemRegistry *R);
 
-//desc is copied, returns the system id or -1 on bad input
+//desc is copied, returns the system id, or -1 on bad input or if it was registered after systems_init and its init failed
 int register_system(SystemRegistry *R, const SystemDesc *desc);
 
-void systems_init(SystemRegistry *R);
+//runs init on every system, returns false if any of them failed (the others still run)
+bool systems_init(SystemRegistry *R);
 
 void systems_run(SystemRegistry *R, float dt);
 
+//failed systems stay disabled
 void set_system_enabled(SystemRegistry *R, int id, bool enabled);
 
 #endif
