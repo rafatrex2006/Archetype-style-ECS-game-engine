@@ -31,11 +31,11 @@ int main(int argc, char *argv[])
         SDL_Log("Could not load fade.png: %s", SDL_GetError());
     }
 
-    entity *box = CreateEntity(World);
+    entity box = CreateEntity(World);
     add_component(World, box, TRANSFORM, &(Transform){50, 50});
     add_component(World, box, SHAPE, &(Shape){.type = SHAPE_RECT, .color = {1, 0, 0, 1}, .filled = true, .rect = {200, 100}});
 
-    entity *sprite = CreateEntity(World);
+    entity sprite = CreateEntity(World);
     add_component(World, sprite, TRANSFORM, &(Transform){100, 100});
     add_component(World, sprite, SURFACE, &(Surface){.surface = fade});
 

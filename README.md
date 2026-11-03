@@ -9,6 +9,7 @@ An archetype-based Entity Component System (ECS) in C, built from scratch as a l
 - **Archetype storage:** entities with the same components share an archetype, and each component type is stored in its own contiguous array, so iterating it is cache-friendly.
 - **Runtime add/remove:** adding or removing a component moves the entity to the matching archetype.
 - **Cached queries:** "has these components, not those" queries stay up to date as new archetypes appear.
+- **Safe entity handles:** an `entity` is a small value (slot + generation). Once the entity dies, every copy of its handle is detected as stale and ignored, so it can't crash or touch a different entity.
 - **Systems:** functions that run every frame, in phases, owned by the `World`.
 - **Renderer:** draws entities that have a `Transform` plus a `Shape` or a `Surface` (image).
 - **No global state:** everything lives in a `World`.
@@ -33,13 +34,17 @@ register_system_world(W, &ACCELERATE_SYSTEM);
 register_system_world(W, &MOVE_SYSTEM);
 
 // entities
-entity *box = CreateEntity(W);
+entity box = CreateEntity(W);                                    // a handle, copy it freely
 add_component(W, box, TRANSFORM, &(Transform){50, 50});          // copy initial data in
 add_component(W, box, VELOCITY, &(Velocity){20, 0});
 add_component(W, box, SHAPE, &(Shape){
     .type = SHAPE_RECT, .color = {1, 0, 0, 1}, .filled = true, .rect = {200, 100},
 });
 add_component(W, box, HEALTH, NULL);                             // NULL uses the default values
+
+Health *hp = get_component(W, box, HEALTH);                      // NULL if dead or missing
+DestroyEnt(W, box);
+entity_alive(W, box);                                            // false; using box now does nothing
 
 if (!world_init_systems(W)) { /* a system failed to start */ }
 
@@ -94,7 +99,7 @@ SDL_DestroySurface(img);
 ## Project layout
 
 ```
-data_structures/   World, archetypes, hash table, queries
+data_structures/   World, archetypes, hash table, queries, entity table
 metadata/          Component enum and component registration
 System_Handler/    system registry and phase scheduler
 systems/           example systems: accelerate and move
@@ -107,7 +112,6 @@ main.c             window, World and main loop
 ## Known limitations
 
 - At most 64 component types.
-- Entity handles are not checked: using a destroyed entity is not detected.
 - Adding or removing components while iterating a query is unsafe.
 - Each `Surface` gets its own texture, freed only when the renderer shuts down.
 - Images are drawn at their original size, with no scaling, rotation or layers.
@@ -124,7 +128,7 @@ main.c             window, World and main loop
 - [ ] Modules: one function that registers a feature's components and systems
 - [ ] Runtime component registration
 - [ ] Command buffer for safe add/remove during iteration
-- [ ] Entity generations to detect stale handles
+- [x] Entity handles with generations to detect stale handles
 - [ ] Event bus
 - [ ] Multithreaded systems
 - [ ] Demo and benchmark

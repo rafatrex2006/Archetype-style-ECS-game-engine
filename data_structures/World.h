@@ -6,11 +6,13 @@
 #include "archetype_hashtable.h"
 #include "System_Handler/system_handler.h"
 #include "queries.h"
+#include "entity_table.h"
 #include <SDL3/SDL.h>
 
 typedef struct World{
     archetype_array *ArcArray;
     archetype_hasht *ArcTable;
+    EntityTable *entities;
     queries *QueryArr;
     metadata *metadata;
     SystemRegistry *systems;

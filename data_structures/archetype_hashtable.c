@@ -18,7 +18,7 @@ archetype_hasht *createArcTable(int size, int ArcSize, archetype_array *arr){
     
     //create archtype zero
     archetype *temp = (archetype*)malloc(sizeof(archetype));
-    temp->entities = (entity**)malloc(ArcSize*sizeof(entity*)*10);
+    temp->entities = (uint32_t*)malloc(ArcSize*sizeof(uint32_t)*10);
     temp->capacity = ArcSize*10;
     temp->entityCount = 0;
     temp->data = NULL;
@@ -30,7 +30,6 @@ archetype_hasht *createArcTable(int size, int ArcSize, archetype_array *arr){
     //
     ht->size = size;
     ht->ArcSize = ArcSize;
-    ht->entity_Count = 0;
     return ht;
 }
 
@@ -106,19 +105,6 @@ void AddArc(World *W, archetype *arc){
     AddArc(W, arc);
 }
 
-
-entity *CreateEntity(World *W){
-    entity *Ent = (entity*)malloc(sizeof(entity));
-    Ent->id = W->ArcTable->entity_Count++;
-
-    //add to the hashmap.
-    Ent->arch = HashLookupAdd(W, 0);
-    if(Ent->arch->entityCount == Ent->arch->capacity)
-        DoubleArchSize(Ent->arch);
-    Ent->index = Ent->arch->entityCount++;
-    Ent->arch->entities[Ent->index] = Ent;
-    return Ent;
-}
 
 archetype *HashLookupComp(World *W, Component *comps, int n){
     signature sig = 0;

@@ -13,7 +13,7 @@
 
 archetype *createArc(World *W, signature sig, int capacity){
     archetype *arc = (archetype*)malloc(sizeof(archetype));
-    arc->entities = (entity**)malloc(capacity*sizeof(entity*));
+    arc->entities = (uint32_t*)malloc(capacity*sizeof(uint32_t));
     arc->entityCount = 0;
     arc->capacity = capacity;
     arc->sig = sig;
@@ -47,7 +47,7 @@ void DoubleArchSize(archetype *arch){
     int count = __builtin_popcountll(arch->sig);
     arch->capacity *= 2;
 
-    arch->entities = (entity**)realloc(arch->entities, arch->capacity*sizeof(entity*));
+    arch->entities = (uint32_t*)realloc(arch->entities, arch->capacity*sizeof(uint32_t));
     for(int i = 0; i < count; i++){
         arch->data[i].data = (void*)realloc(arch->data[i].data, arch->capacity*arch->data[i].DataSize);
     }
@@ -66,7 +66,11 @@ void ArcMoveEnt(World *W, void* src, void* dst, int component){
     }
 }
 
-void add_component(World *W, entity *Ent, Component Comp, void *data){
+void add_component(World *W, entity e, Component Comp, void *data){
+    EntitySlot *Ent = GetSlot(W, e);
+    if(Ent == NULL){
+        return; //dead or stale handle
+    }
     signature sig = Ent->arch->sig;
     signature new_sig = sig | (1ULL << Comp);
 
@@ -74,7 +78,7 @@ void add_component(World *W, entity *Ent, Component Comp, void *data){
         //already has the component: just overwrite the value
         if(data){
             int col = __builtin_popcountll(sig & ((1ULL << Comp) - 1));
-            memcpy(ComponentPtr(&Ent->arch->data[col], Ent->index), data, Ent->arch->data[col].DataSize);
+            memcpy(ComponentPtr(&Ent->arch->data[col], Ent->row), data, Ent->arch->data[col].DataSize);
         }
         return;
     }
@@ -85,7 +89,7 @@ void add_component(World *W, entity *Ent, Component Comp, void *data){
     if(arc2->entityCount == arc2->capacity)
         DoubleArchSize(arc2);
 
-    int oldRow = Ent->index;
+    int oldRow = Ent->row;
     int newRow = arc2->entityCount;
     int lastRow = arc1->entityCount-1;
 
@@ -105,13 +109,12 @@ void add_component(World *W, entity *Ent, Component Comp, void *data){
         bits &= bits - 1;
     }
 
-    arc2->entities[newRow] = arc1->entities[Ent->index];
-    if(Ent->index != lastRow){
-        arc1->entities[Ent->index] = arc1->entities[lastRow];
-        arc1->entities[Ent->index]->index = Ent->index;
+    arc2->entities[newRow] = arc1->entities[oldRow];
+    if(oldRow != lastRow){
+        arc1->entities[oldRow] = arc1->entities[lastRow];
+        W->entities->slots[arc1->entities[oldRow]].row = oldRow;   //the moved entity's slot follows it
     }
-    arc1->entities[lastRow] = NULL;
-    Ent->index = newRow;
+    Ent->row = newRow;
     Ent->arch = arc2;
 
     int new_col = __builtin_popcountll(new_sig & ((1ULL << Comp) - 1));
@@ -127,7 +130,11 @@ void add_component(World *W, entity *Ent, Component Comp, void *data){
 }
 
 
-void remove_component(World *W, entity *Ent, Component Comp){
+void remove_component(World *W, entity e, Component Comp){
+    EntitySlot *Ent = GetSlot(W, e);
+    if(Ent == NULL){
+        return; //dead or stale handle
+    }
     signature sig = Ent->arch->sig;
     signature new_sig = sig & (~(1ULL << Comp));
 
@@ -141,7 +148,7 @@ void remove_component(World *W, entity *Ent, Component Comp){
     if(arc2->entityCount == arc2->capacity)
         DoubleArchSize(arc2);
 
-    int oldRow = Ent->index;
+    int oldRow = Ent->row;
     int newRow = arc2->entityCount;
     int lastRow = arc1->entityCount-1;
 
@@ -172,13 +179,12 @@ void remove_component(World *W, entity *Ent, Component Comp){
     }
 
 
-    arc2->entities[newRow] = arc1->entities[Ent->index];
-    if(Ent->index != lastRow){
-        arc1->entities[Ent->index] = arc1->entities[lastRow];
-        arc1->entities[Ent->index]->index = Ent->index;
+    arc2->entities[newRow] = arc1->entities[oldRow];
+    if(oldRow != lastRow){
+        arc1->entities[oldRow] = arc1->entities[lastRow];
+        W->entities->slots[arc1->entities[oldRow]].row = oldRow;   //the moved entity's slot follows it
     }
-    arc1->entities[lastRow] = NULL;
-    Ent->index = newRow;
+    Ent->row = newRow;
     Ent->arch = arc2;
 
     arc2->entityCount++;
@@ -195,9 +201,13 @@ void remove_component(World *W, entity *Ent, Component Comp){
  */
 
 
-void DestroyEnt(World *W, entity *Ent){
+void DestroyEnt(World *W, entity e){
+    EntitySlot *Ent = GetSlot(W, e);
+    if(Ent == NULL){
+        return;
+    }
     archetype *arc1 = Ent->arch;
-    int oldRow = Ent->index;
+    int oldRow = Ent->row;
     int lastRow = arc1->entityCount-1;
 
     unsigned long long bits = arc1->sig;
@@ -220,12 +230,11 @@ void DestroyEnt(World *W, entity *Ent){
     }
     if (oldRow != lastRow) {
         arc1->entities[oldRow] = arc1->entities[lastRow];
-        arc1->entities[oldRow]->index = oldRow;
+        W->entities->slots[arc1->entities[oldRow]].row = oldRow;
     }
 
-    arc1->entities[lastRow] = NULL;
     arc1->entityCount--;
-    free(Ent);
+    ReleaseSlot(W->entities, e.index);  //every handle to this entity is stale from here on
 }
 
 
@@ -249,10 +258,7 @@ void freeArc(World *W, archetype *arc){
 
         bits &= bits - 1;
     }
-    
-    for(int i = 0; i < arc->entityCount; i++){
-        free(arc->entities[i]);
-    }
+
     free(arc->entities);
     free(arc->data);
     free(arc);

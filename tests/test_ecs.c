@@ -14,8 +14,9 @@
 static int failures = 0;
 #define CHECK(cond) do { if(!(cond)){ printf("  FAIL line %d: %s\n", __LINE__, #cond); failures++; } } while(0)
 
-/* column of a component inside an entity's archetype, same popcount rule the ECS uses */
-#define COMP(ent, comp, type) ((type*)(ent)->arch->data[__builtin_popcountll((ent)->arch->sig & ((1ULL << (comp)) - 1))].data + (ent)->index)
+/* both expect a World *W in scope */
+#define COMP(ent, comp, type) ((type*)get_component(W, (ent), (comp)))
+#define ARCH(ent) (GetSlot(W, (ent))->arch)
 
 /* Health gets a destructor here so we can count how many times it runs. */
 static int destroyed = 0;
@@ -27,6 +28,20 @@ static int rowsInQuery(archetype_array *q){
     return total;
 }
 
+/* every live row of every archetype and the slot it names must point at each other,
+   counts the rows where they don't */
+static int badRows(World *W){
+    int bad = 0;
+    for(int a = 0; a < W->ArcArray->n; a++){
+        archetype *arc = W->ArcArray->arcs[a];
+        for(int r = 0; r < arc->entityCount; r++){
+            EntitySlot *s = &W->entities->slots[arc->entities[r]];
+            if(s->arch != arc || s->row != r) bad++;
+        }
+    }
+    return bad;
+}
+
 /* ---------------- ECS core ---------------- */
 
 static void test_add_remove(void){
@@ -35,28 +50,28 @@ static void test_add_remove(void){
     World *W = createWorld(20, 4, m, NULL);
     Transform t = {1.0f, 2.0f};
 
-    entity *e = CreateEntity(W);
+    entity e = CreateEntity(W);
     add_component(W, e, TRANSFORM, &t);
     add_component(W, e, VELOCITY, NULL);
-    CHECK(e->arch->sig == ((1ULL << TRANSFORM) | (1ULL << VELOCITY)));
+    CHECK(ARCH(e)->sig == ((1ULL << TRANSFORM) | (1ULL << VELOCITY)));
 
-    Transform *got = (Transform*)e->arch->data[0].data + e->index;
+    Transform *got = COMP(e, TRANSFORM, Transform);
     CHECK(got->x == 1.0f && got->y == 2.0f);   /* data survived the move */
 
     add_component(W, e, TRANSFORM, NULL);        /* duplicate add must be a no-op */
-    CHECK(e->arch->entityCount == 1);
+    CHECK(ARCH(e)->entityCount == 1);
 
     remove_component(W, e, VELOCITY);
-    CHECK(e->arch->sig == (1ULL << TRANSFORM));
-    got = (Transform*)e->arch->data[0].data + e->index;
+    CHECK(ARCH(e)->sig == (1ULL << TRANSFORM));
+    got = COMP(e, TRANSFORM, Transform);
     CHECK(got->x == 1.0f && got->y == 2.0f);
 
     remove_component(W, e, HEALTH);              /* removing a missing component must be a no-op */
-    CHECK(e->arch->sig == (1ULL << TRANSFORM));
+    CHECK(ARCH(e)->sig == (1ULL << TRANSFORM));
 
-    entity *u = CreateEntity(W);
+    entity u = CreateEntity(W);
     add_component(W, u, HEALTH, NULL);
-    Health *h = (Health*)u->arch->data[0].data + u->index;
+    Health *h = COMP(u, HEALTH, Health);
     CHECK(h->hp == 100);
 
     freeWorld(W); freeMetadata(m);
@@ -67,20 +82,23 @@ static void test_swap_remove_keeps_indices(void){
     metadata *m = createMetadata(64);
     World *W = createWorld(20, 4, m, NULL);
     enum { N = 50 };
-    entity *ents[N];
+    entity ents[N];
     for(int i = 0; i < N; i++){
         ents[i] = CreateEntity(W);
         Transform t = {(float)i, (float)i * 2};
         add_component(W, ents[i], TRANSFORM, &t);
     }
     /* destroy every third entity, then verify the survivors still own their own data */
-    for(int i = 0; i < N; i += 3){ DestroyEnt(W, ents[i]); ents[i] = NULL; }
+    for(int i = 0; i < N; i += 3){ DestroyEnt(W, ents[i]); }
     for(int i = 0; i < N; i++){
-        if(!ents[i]) continue;
-        Transform *t = (Transform*)ents[i]->arch->data[0].data + ents[i]->index;
+        if(i % 3 == 0){ CHECK(!entity_alive(W, ents[i])); continue; }
+        Transform *t = COMP(ents[i], TRANSFORM, Transform);
         CHECK(t->x == (float)i && t->y == (float)i * 2);
-        CHECK(ents[i]->arch->entities[ents[i]->index] == ents[i]);
+        EntitySlot *s = GetSlot(W, ents[i]);
+        CHECK(s->row < s->arch->entityCount);                 /* inside the live rows */
+        CHECK(s->arch->entities[s->row] == ents[i].index);   /* row and slot point at each other */
     }
+    CHECK(badRows(W) == 0);
     freeWorld(W); freeMetadata(m);
 }
 
@@ -91,7 +109,7 @@ static void test_destructors(void){
     World *W = createWorld(20, 4, m, NULL);
     destroyed = 0;
 
-    entity *a = CreateEntity(W), *b = CreateEntity(W), *c = CreateEntity(W);
+    entity a = CreateEntity(W), b = CreateEntity(W), c = CreateEntity(W);
     add_component(W, a, HEALTH, NULL);
     add_component(W, b, HEALTH, NULL);
     add_component(W, c, HEALTH, NULL);
@@ -117,7 +135,7 @@ static void test_growth_and_queries(void){
     archetype_array *movingNH = createCustomQueue(W, in, 2, out, 1);   /* created BEFORE entities exist */
 
     enum { N = 5000 };
-    entity **ents = malloc(N * sizeof(entity*));
+    entity *ents = malloc(N * sizeof(entity));
     for(int i = 0; i < N; i++){
         ents[i] = CreateEntity(W);        /* 5000 > capacity of archetype 0 */
         add_component(W, ents[i], TRANSFORM, NULL);
@@ -129,6 +147,117 @@ static void test_growth_and_queries(void){
 
     createQuery(W, 1ULL << TRANSFORM);
     CHECK(createQuery(W, 1ULL << TRANSFORM) == createQuery(W, 1ULL << TRANSFORM));  /* cache hit */
+
+    free(ents);
+    freeWorld(W); freeMetadata(m);
+}
+
+/* ---------------- entity handles ---------------- */
+
+static void test_stale_handles(void){
+    printf("stale handles are detected and ignored\n");
+    metadata *m = createMetadata(64);
+    assign_new_component(m, sizeof(Health), HEALTH, alignof(Health), createHealth, countDestroy, NULL);
+    World *W = createWorld(20, 4, m, NULL);
+    destroyed = 0;
+
+    entity a = CreateEntity(W);
+    add_component(W, a, TRANSFORM, &(Transform){ 1.0f, 1.0f });
+    add_component(W, a, HEALTH, NULL);
+    CHECK(entity_alive(W, a));
+
+    entity target = a;                           /* a copy, like a bullet remembering its target */
+    DestroyEnt(W, a);
+    CHECK(destroyed == 1);
+    CHECK(!entity_alive(W, a));
+    CHECK(!entity_alive(W, target));             /* every copy goes stale */
+
+    entity b = CreateEntity(W);                  /* reuses a's slot with a new generation */
+    add_component(W, b, TRANSFORM, &(Transform){ 7.0f, 7.0f });
+    CHECK(b.index == a.index);
+    CHECK(b.gen != a.gen);
+    CHECK(entity_alive(W, b));
+    CHECK(!entity_alive(W, target));             /* the old handle doesn't reach the new entity */
+
+    /* everything done through the stale handle is ignored and leaves b alone */
+    add_component(W, target, VELOCITY, NULL);
+    remove_component(W, target, TRANSFORM);
+    DestroyEnt(W, target);                       /* double destroy */
+    CHECK(destroyed == 1);
+    CHECK(entity_alive(W, b) && ARCH(b)->sig == (1ULL << TRANSFORM));
+    CHECK(get_component(W, target, TRANSFORM) == NULL);
+    Transform *bt = COMP(b, TRANSFORM, Transform);
+    CHECK(bt && bt->x == 7.0f && bt->y == 7.0f);
+
+    /* handles that were never valid */
+    CHECK(!entity_alive(W, NULL_ENTITY));
+    CHECK(!entity_alive(W, (entity){0}));        /* a zeroed handle is NULL_ENTITY */
+    CHECK(!entity_alive(W, (entity){ 999, 1 })); /* slot doesn't exist */
+    DestroyEnt(W, NULL_ENTITY);
+    add_component(W, (entity){ 999, 1 }, HEALTH, NULL);
+    CHECK(destroyed == 1);
+
+    CHECK(get_component(W, b, HEALTH) == NULL);  /* alive but doesn't have it */
+
+    freeWorld(W); freeMetadata(m);
+}
+
+static void test_moved_rows_follow(void){
+    printf("entities moved by swap-remove keep working through their handles\n");
+    metadata *m = createMetadata(64);
+    World *W = createWorld(20, 4, m, NULL);
+
+    /* three entities in the same archetype; moving out the first one swaps the last into its row */
+    entity e[3];
+    for(int i = 0; i < 3; i++){
+        e[i] = CreateEntity(W);
+        add_component(W, e[i], TRANSFORM, &(Transform){ (float)i, 0.0f });
+    }
+    add_component(W, e[0], VELOCITY, NULL);      /* e[0] leaves, e[2] fills its row */
+    remove_component(W, e[1], TRANSFORM);        /* e[1] leaves too */
+    DestroyEnt(W, e[0]);
+
+    CHECK(!entity_alive(W, e[0]));
+    CHECK(entity_alive(W, e[1]) && entity_alive(W, e[2]));
+    CHECK(get_component(W, e[1], TRANSFORM) == NULL);
+    Transform *t2 = COMP(e[2], TRANSFORM, Transform);
+    CHECK(t2 && t2->x == 2.0f);
+    CHECK(badRows(W) == 0);
+    freeWorld(W); freeMetadata(m);
+}
+
+static void test_slot_reuse_and_growth(void){
+    printf("entity table reuses slots and grows past its start size\n");
+    metadata *m = createMetadata(64);
+    World *W = createWorld(20, 4, m, NULL);      /* table starts with 4 slots */
+
+    /* spawn and kill 10,000 entities, never more than 10 alive: the table stays at 10 slots */
+    entity alive[10];
+    for(int i = 0; i < 10; i++) alive[i] = CreateEntity(W);
+    for(int round = 0; round < 1000; round++){
+        for(int i = 0; i < 10; i++){
+            DestroyEnt(W, alive[i]);
+            alive[i] = CreateEntity(W);
+        }
+    }
+    CHECK(W->entities->n == 10);
+    for(int i = 0; i < 10; i++) CHECK(entity_alive(W, alive[i]));
+
+    /* grow far past 4 slots: handles stay valid after the table is reallocated */
+    enum { N = 3000 };
+    entity *ents = malloc(N * sizeof(entity));
+    for(int i = 0; i < N; i++){
+        ents[i] = CreateEntity(W);
+        add_component(W, ents[i], TRANSFORM, &(Transform){ (float)i, 0.0f });
+    }
+    CHECK(W->entities->n == 10 + N);
+    int bad = 0;
+    for(int i = 0; i < N; i++){
+        Transform *t = COMP(ents[i], TRANSFORM, Transform);
+        if(!t || t->x != (float)i) bad++;
+    }
+    CHECK(bad == 0);
+    CHECK(badRows(W) == 0);
 
     free(ents);
     freeWorld(W); freeMetadata(m);
@@ -387,22 +516,22 @@ static void test_movement_systems(void){
     register_system_world(W, &MOVE_SYSTEM);
     register_system_world(W, &ACCELERATE_SYSTEM);
 
-    entity *falling = CreateEntity(W);           /* Transform + Velocity + Acceleration */
+    entity falling = CreateEntity(W);           /* Transform + Velocity + Acceleration */
     add_component(W, falling, TRANSFORM, NULL);
     add_component(W, falling, VELOCITY, NULL);
     add_component(W, falling, ACCELERATION, &(Acceleration){ 2.0f, 0.0f });
 
-    entity *drifting = CreateEntity(W);          /* Transform + Velocity, constant speed */
+    entity drifting = CreateEntity(W);          /* Transform + Velocity, constant speed */
     add_component(W, drifting, TRANSFORM, &(Transform){ 10.0f, 10.0f });
     add_component(W, drifting, VELOCITY, &(Velocity){ 3.0f, -4.0f });
 
-    entity *still = CreateEntity(W);             /* no Velocity, must not move */
+    entity still = CreateEntity(W);             /* no Velocity, must not move */
     add_component(W, still, TRANSFORM, &(Transform){ 5.0f, 5.0f });
 
     world_init_systems(W);
 
     /* archetype created after the queries: must still be picked up */
-    entity *late = CreateEntity(W);
+    entity late = CreateEntity(W);
     add_component(W, late, TRANSFORM, NULL);
     add_component(W, late, VELOCITY, &(Velocity){ 1.0f, 1.0f });
     add_component(W, late, HEALTH, NULL);
@@ -435,6 +564,10 @@ int main(void){
     test_swap_remove_keeps_indices();
     test_destructors();
     test_growth_and_queries();
+
+    test_stale_handles();
+    test_moved_rows_follow();
+    test_slot_reuse_and_growth();
 
     test_register_validation();
     test_init_timing();
