@@ -507,6 +507,47 @@ static void test_registry_growth(void){
     freeMetadata(m);
 }
 
+/* two systems that both destroy the same stored handle in the same frame,
+   like combat and an out-of-bounds check killing the same enemy */
+static entity kill_target;
+static void kill_update(World *W, float dt, void *state){ (void)dt; (void)state; DestroyEnt(W, kill_target); }
+
+static void test_same_frame_double_destroy(void){
+    printf("two systems destroying the same entity in one frame\n");
+    metadata *m = createMetadata(64);
+    assign_new_component(m, sizeof(Health), HEALTH, alignof(Health), createHealth, countDestroy, NULL);
+    World *W = createWorld(20, 4, m, NULL);
+    destroyed = 0;
+
+    entity enemy = CreateEntity(W);
+    add_component(W, enemy, HEALTH, NULL);
+    entity bystander = CreateEntity(W);
+    add_component(W, bystander, HEALTH, NULL);
+    kill_target = enemy;
+
+    register_system_world(W, &(SystemDesc){ .name = "combat", .phase = PHASE_UPDATE, .update = kill_update });
+    register_system_world(W, &(SystemDesc){ .name = "bounds", .phase = PHASE_UPDATE, .update = kill_update });
+    world_init_systems(W);
+    UpdateWorld(W, 0.0f);
+
+    CHECK(!entity_alive(W, enemy));
+    CHECK(destroyed == 1);                       /* components destroyed once, not twice */
+    CHECK(entity_alive(W, bystander));
+    CHECK(get_component(W, bystander, HEALTH) != NULL);
+
+    /* the slot went on the free list once: two new entities must get two different slots */
+    entity a = CreateEntity(W), b = CreateEntity(W);
+    CHECK(a.index != b.index);
+    CHECK(entity_alive(W, a) && entity_alive(W, b));
+    CHECK(badRows(W) == 0);
+
+    UpdateWorld(W, 0.0f);                        /* next frame the stale target is ignored again */
+    CHECK(entity_alive(W, a) && entity_alive(W, b) && entity_alive(W, bystander));
+    CHECK(destroyed == 1);
+
+    freeWorld(W); freeMetadata(m);
+}
+
 static void test_movement_systems(void){
     printf("accelerate + move systems update components through UpdateWorld\n");
     metadata *m = createMetadata(64);
@@ -576,6 +617,7 @@ int main(void){
     test_destroy();
     test_init_failure();
     test_registry_growth();
+    test_same_frame_double_destroy();
     test_movement_systems();
 
     if(failures){ printf("\n%d check(s) FAILED\n", failures); return 1; }

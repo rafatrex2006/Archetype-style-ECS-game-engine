@@ -88,7 +88,7 @@ void ReleaseSlot(EntityTable *T, uint32_t index){
     s->arch = NULL;
     s->gen++;
     if(s->gen == 0){
-        s->gen = 1;     //wrapped around after 4 billion reuses, skip 0
+        s->gen = 1;
     }
     s->next_free = T->free_head;
     T->free_head = (int)index;
