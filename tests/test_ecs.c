@@ -548,6 +548,190 @@ static void test_same_frame_double_destroy(void){
     freeWorld(W); freeMetadata(m);
 }
 
+/* ---------------- command buffer ---------------- */
+
+/* handle of the entity stored in an archetype row */
+static entity entity_at(World *W, archetype *arc, int row){
+    uint32_t slot = arc->entities[row];
+    return (entity){ slot, W->entities->slots[slot].gen };
+}
+
+static archetype_array *cmd_query;   /* set by each test before UpdateWorld */
+static int visits, still_alive_in_loop;
+
+/* destroys every entity it iterates over */
+static void destroy_all_update(World *W, float dt, void *state){
+    (void)dt; (void)state;
+    for(int i = 0; i < cmd_query->n; i++){
+        archetype *arc = cmd_query->arcs[i];
+        for(int r = 0; r < arc->entityCount; r++){
+            entity e = entity_at(W, arc, r);
+            visits++;
+            DestroyEnt(W, e);
+            if(entity_alive(W, e)) still_alive_in_loop++;   /* queued, not applied yet */
+        }
+    }
+}
+
+static void test_cmd_destroy_during_iteration(void){
+    printf("command buffer: destroying while iterating visits every entity\n");
+    metadata *m = createMetadata(64);
+    assign_new_component(m, sizeof(Health), HEALTH, alignof(Health), createHealth, countDestroy, NULL);
+    World *W = createWorld(20, 4, m, NULL);
+    destroyed = visits = still_alive_in_loop = 0;
+
+    enum { N = 50 };
+    entity ents[N];
+    for(int i = 0; i < N; i++){
+        ents[i] = CreateEntity(W);
+        add_component(W, ents[i], TRANSFORM, NULL);
+        add_component(W, ents[i], HEALTH, NULL);
+    }
+    cmd_query = createCustomQueue(W, (Component[]){ TRANSFORM }, 1, NULL, 0);
+    register_system_world(W, &(SystemDesc){ .name = "destroy all", .phase = PHASE_UPDATE, .update = destroy_all_update });
+    world_init_systems(W);
+
+    UpdateWorld(W, 0.0f);
+    CHECK(visits == N);                          /* applied immediately this would skip about half */
+    CHECK(still_alive_in_loop == N);             /* nothing died mid loop */
+    CHECK(destroyed == N);
+    CHECK(rowsInQuery(cmd_query) == 0);
+    int alive = 0;
+    for(int i = 0; i < N; i++) alive += entity_alive(W, ents[i]);
+    CHECK(alive == 0);
+    CHECK(W->command_buffer->n_count == 0);      /* buffer emptied by the flush */
+    CHECK(badRows(W) == 0);
+
+    freeWorld(W); freeMetadata(m);
+}
+
+/* gives every iterated entity a Velocity from a temporary, which is gone by flush time */
+static void add_velocity_update(World *W, float dt, void *state){
+    (void)dt; (void)state;
+    for(int i = 0; i < cmd_query->n; i++){
+        archetype *arc = cmd_query->arcs[i];
+        Transform *pos = (Transform*)arc->data[0].data;   /* Transform is column 0 here */
+        for(int r = 0; r < arc->entityCount; r++){
+            visits++;
+            add_component(W, entity_at(W, arc, r), VELOCITY, &(Velocity){ pos[r].x, -pos[r].x });
+        }
+    }
+}
+
+static void test_cmd_add_during_iteration(void){
+    printf("command buffer: adding while iterating, data copied, buffers grow\n");
+    metadata *m = createMetadata(64);
+    World *W = createWorld(20, 4, m, NULL);      /* 20 commands and 200 data bytes to start */
+    visits = 0;
+
+    enum { N = 300 };                            /* 300 commands, 2400 data bytes: both buffers must grow */
+    entity *ents = malloc(N * sizeof(entity));
+    for(int i = 0; i < N; i++){
+        ents[i] = CreateEntity(W);
+        add_component(W, ents[i], TRANSFORM, &(Transform){ (float)i, 0.0f });
+    }
+    cmd_query = createCustomQueue(W, (Component[]){ TRANSFORM }, 1, (Component[]){ VELOCITY }, 1);
+    register_system_world(W, &(SystemDesc){ .name = "add velocity", .phase = PHASE_UPDATE, .update = add_velocity_update });
+    world_init_systems(W);
+
+    UpdateWorld(W, 0.0f);
+    CHECK(visits == N);                          /* nobody skipped or visited twice */
+    int bad = 0;
+    for(int i = 0; i < N; i++){
+        Velocity *v = COMP(ents[i], VELOCITY, Velocity);
+        if(!v || v->x != (float)i || v->y != -(float)i) bad++;
+    }
+    CHECK(bad == 0);                             /* each entity got its own copied value */
+    CHECK(rowsInQuery(cmd_query) == 0);          /* they all moved to Transform + Velocity */
+
+    visits = 0;
+    UpdateWorld(W, 0.0f);                        /* query excludes Velocity now: nothing to do */
+    CHECK(visits == 0);
+    CHECK(badRows(W) == 0);
+
+    free(ents);
+    freeWorld(W); freeMetadata(m);
+}
+
+/* PRE_UPDATE adds Health, UPDATE checks it can see it */
+static entity phase_target;
+static int seen_same_phase, seen_next_phase;
+static void add_health_update(World *W, float dt, void *state){
+    (void)dt; (void)state;
+    add_component(W, phase_target, HEALTH, NULL);
+    seen_same_phase = get_component(W, phase_target, HEALTH) != NULL;
+}
+static void look_for_health_update(World *W, float dt, void *state){
+    (void)dt; (void)state;
+    seen_next_phase = get_component(W, phase_target, HEALTH) != NULL;
+}
+
+static void test_cmd_visible_next_phase(void){
+    printf("command buffer: changes show up in the next phase\n");
+    metadata *m = createMetadata(64);
+    World *W = createWorld(20, 4, m, NULL);
+    seen_same_phase = seen_next_phase = -1;
+
+    phase_target = CreateEntity(W);
+    register_system_world(W, &(SystemDesc){ .name = "add", .phase = PHASE_PRE_UPDATE, .update = add_health_update });
+    register_system_world(W, &(SystemDesc){ .name = "look", .phase = PHASE_UPDATE, .update = look_for_health_update });
+    world_init_systems(W);
+
+    UpdateWorld(W, 0.0f);
+    CHECK(seen_same_phase == 0);                 /* still queued inside its own phase */
+    CHECK(seen_next_phase == 1);                 /* flushed between the phases */
+    Health *h = COMP(phase_target, HEALTH, Health);
+    CHECK(h && h->hp == 100);                    /* NULL data used the constructor */
+
+    add_component(W, phase_target, VELOCITY, NULL);   /* outside systems: applied right away */
+    CHECK(get_component(W, phase_target, VELOCITY) != NULL);
+    CHECK(W->command_buffer->n_count == 0);
+
+    freeWorld(W); freeMetadata(m);
+}
+
+/* queues a destroy and then more changes for the same entity in one phase */
+static entity mixed_target, mixed_other;
+static void mixed_update(World *W, float dt, void *state){
+    (void)dt; (void)state;
+    add_component(W, mixed_target, HEALTH, NULL);
+    DestroyEnt(W, mixed_target);
+    add_component(W, mixed_target, VELOCITY, NULL);   /* after the destroy: must be ignored */
+    remove_component(W, mixed_target, TRANSFORM);
+    DestroyEnt(W, mixed_target);                      /* twice */
+    remove_component(W, mixed_other, VELOCITY);       /* another entity in the same flush */
+}
+
+static void test_cmd_destroy_then_change(void){
+    printf("command buffer: destroy mixed with other commands for the same entity\n");
+    metadata *m = createMetadata(64);
+    assign_new_component(m, sizeof(Health), HEALTH, alignof(Health), createHealth, countDestroy, NULL);
+    World *W = createWorld(20, 4, m, NULL);
+    destroyed = 0;
+
+    mixed_target = CreateEntity(W);
+    add_component(W, mixed_target, TRANSFORM, NULL);
+    mixed_other = CreateEntity(W);
+    add_component(W, mixed_other, TRANSFORM, &(Transform){ 3.0f, 4.0f });
+    add_component(W, mixed_other, VELOCITY, NULL);
+    register_system_world(W, &(SystemDesc){ .name = "mixed", .phase = PHASE_UPDATE, .update = mixed_update });
+    world_init_systems(W);
+
+    UpdateWorld(W, 0.0f);
+    CHECK(!entity_alive(W, mixed_target));
+    CHECK(destroyed == 1);                       /* the Health added before the destroy died with it, once */
+    CHECK(entity_alive(W, mixed_other));
+    CHECK(get_component(W, mixed_other, VELOCITY) == NULL);
+    Transform *t = COMP(mixed_other, TRANSFORM, Transform);
+    CHECK(t && t->x == 3.0f && t->y == 4.0f);
+
+    entity fresh = CreateEntity(W);              /* reuses the dead slot: the ignored commands didn't touch it */
+    CHECK(entity_alive(W, fresh) && ARCH(fresh)->sig == 0);
+    CHECK(badRows(W) == 0);
+
+    freeWorld(W); freeMetadata(m);
+}
+
 static void test_movement_systems(void){
     printf("accelerate + move systems update components through UpdateWorld\n");
     metadata *m = createMetadata(64);
@@ -619,6 +803,11 @@ int main(void){
     test_registry_growth();
     test_same_frame_double_destroy();
     test_movement_systems();
+
+    test_cmd_destroy_during_iteration();
+    test_cmd_add_during_iteration();
+    test_cmd_visible_next_phase();
+    test_cmd_destroy_then_change();
 
     if(failures){ printf("\n%d check(s) FAILED\n", failures); return 1; }
     printf("\nall tests passed\n");
