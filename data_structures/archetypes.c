@@ -67,6 +67,12 @@ void ArcMoveEnt(World *W, void* src, void* dst, int component){
 }
 
 void add_component(World *W, entity e, Component Comp, void *data){
+
+    if(W->in_systems){
+        AddCMDToArray(W->command_buffer, (cmd_command){.op = 0, .e = e, .comp = Comp}, data, data ? W->metadata->sizes[Comp] : 0);
+        return;
+    }
+
     EntitySlot *Ent = GetSlot(W, e);
     if(Ent == NULL){
         return; //dead or stale handle
@@ -131,6 +137,12 @@ void add_component(World *W, entity e, Component Comp, void *data){
 
 
 void remove_component(World *W, entity e, Component Comp){
+
+    if(W->in_systems){
+        AddCMDToArray(W->command_buffer, (cmd_command){.op = 1, .e = e, .comp = Comp}, NULL, 0);
+        return;
+    }
+
     EntitySlot *Ent = GetSlot(W, e);
     if(Ent == NULL){
         return; //dead or stale handle
@@ -194,14 +206,19 @@ void remove_component(World *W, entity e, Component Comp){
 
 
 /*
- * move(dst, src):
- *  - Transfers ownership from src to dst.
- *  - After return, src must be left in a valid destructible state.
- *    (typically by setting owned pointers to NULL).
- */
-
+move(dst, src):
+  - Transfers ownership from src to dst.
+  - After return, src must be left in a valid destructible state.
+    (typically by setting owned pointers to NULL).
+*/
 
 void DestroyEnt(World *W, entity e){
+
+    if(W->in_systems){
+        AddCMDToArray(W->command_buffer, (cmd_command){.op = 2, .e = e}, NULL, 0);
+        return;
+    }
+
     EntitySlot *Ent = GetSlot(W, e);
     if(Ent == NULL){
         return;

@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include "data_structures/World.h"
 
 SystemRegistry *createSystemRegistry(World *W, int size){
     if(size < 1){
@@ -102,12 +103,15 @@ bool systems_init(SystemRegistry *R){
 
 void systems_run(SystemRegistry *R, float dt){
     for(int phase = 0; phase < PHASE_COUNT; phase++){
+        R->W->in_systems = true;
         for(int i = 0; i < R->n; i++){
             System *s = &R->systems[i];
             if((int)s->desc.phase == phase && s->enabled){
                 s->desc.update(R->W, dt, s->state);
             }
         }
+        R->W->in_systems = false;
+        CMDFlush(R->W);
     }
 }
 

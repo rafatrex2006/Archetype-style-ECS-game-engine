@@ -10,13 +10,19 @@ World *createWorld(int size, int EntSize, metadata *meta, SDL_Window *window){
     W->entities = CreateEntityTable(EntSize);
     W->QueryArr = CreateQueryArr(size);
     W->systems = createSystemRegistry(W, size);
+    W->command_buffer = CreateCMDArray(size);
     W->metadata = meta;
     W->window = window;
+
+    //system's flag
+    W->in_systems = false;
+
     return W;
 }
 
 void freeWorld(World *W){
     freeSystemRegistry(W->systems); //first, systems may still use the world while cleaning up
+    freeCMDArray(W->command_buffer);
     freeArcTable(W);
     FreeEntityTable(W->entities);
     freeArcArray(W->ArcArray); //maybe change later

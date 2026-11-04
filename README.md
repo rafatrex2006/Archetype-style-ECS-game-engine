@@ -2,7 +2,7 @@
 
 An archetype-based Entity Component System (ECS) in C, built from scratch as a learning project and meant to become the core of a small game engine. SDL3 handles the window and rendering.
 
-> **Status: early development.** The ECS core, the system scheduler and a basic renderer (shapes and PNG images) work and are tested.
+> **Status: early development.** The ECS core, safe entity handles, the system scheduler with its command buffer, and a basic renderer (shapes and PNG images) work and are tested.
 
 ## Features
 
@@ -11,6 +11,7 @@ An archetype-based Entity Component System (ECS) in C, built from scratch as a l
 - **Cached queries:** "has these components, not those" queries stay up to date as new archetypes appear.
 - **Safe entity handles:** an `entity` is a small value (slot + generation). Once the entity dies, every copy of its handle is detected as stale and ignored, so it can't crash or touch a different entity.
 - **Systems:** functions that run every frame, in phases, owned by the `World`.
+- **Safe changes during iteration:** adding, removing or destroying inside a system is queued and applied after the phase, so loops over queries never skip or repeat entities.
 - **Renderer:** draws entities that have a `Transform` plus a `Shape` or a `Surface` (image).
 - **No global state:** everything lives in a `World`.
 
@@ -75,6 +76,16 @@ Things to know:
 - `freeWorld` destroys systems first, in reverse order, so `destroy` can still use the World.
 - Queries belong to the World. Don't use a query by itself as a system's state, because the default `free(state)` would free it twice. Wrap it in a struct, as `systems/movement.c` does.
 
+### Changing entities inside a system
+
+Call `add_component`, `remove_component` and `DestroyEnt` as usual. While systems are running, the World doesn't apply these changes right away: it queues them in a command buffer and applies them all after the phase ends. That keeps every query loop safe, because no archetype changes while a system is iterating it.
+
+- Changes show up in the **next phase**, not in the rest of the current one. In the same phase, `get_component` still returns `NULL` for a component you just added, and a destroyed entity still counts as alive.
+- `add_component` copies the data when the change is queued, so passing a temporary like `&(Velocity){1, 0}` is fine.
+- Commands for an entity that dies earlier in the same flush are ignored, so destroying twice, or destroying and then adding, is harmless.
+- `CreateEntity` is not queued: it returns a usable handle immediately. The new entity has no components yet, so no query sees it until its queued components are added.
+- Outside systems (setup code, `main`), every change applies immediately.
+
 ## Rendering
 
 The renderer is a system in the `RENDER` phase. Each frame it clears the screen, draws shapes, draws images on top, and presents.
@@ -101,18 +112,18 @@ SDL_DestroySurface(img);
 ```
 data_structures/   World, archetypes, hash table, queries, entity table
 metadata/          Component enum and component registration
-System_Handler/    system registry and phase scheduler
+System_Handler/    system registry, phase scheduler and command buffer
 systems/           example systems: accelerate and move
 components/        Transform, Velocity, Acceleration, Health, Shape, Surface
 renderer/          render system
-tests/             test_ecs.c: ECS core and scheduler tests
+tests/             test_ecs.c: ECS core, entity handle, scheduler and command buffer tests
 main.c             window, World and main loop
 ```
 
 ## Known limitations
 
 - At most 64 component types.
-- Adding or removing components while iterating a query is unsafe.
+- Changing entities while iterating a query is only safe inside systems. Code that loops over a query outside `UpdateWorld` must not add, remove or destroy during the loop.
 - Each `Surface` gets its own texture, freed only when the renderer shuts down.
 - Images are drawn at their original size, with no scaling, rotation or layers.
 - Not thread-safe.
@@ -123,12 +134,12 @@ main.c             window, World and main loop
 - [x] Basic renderer: shapes and PNG images
 - [x] Real frame time (`dt`) in the main loop
 - [x] Scheduler tests
+- [x] Entity handles with generations to detect stale handles
+- [x] Command buffer for safe add/remove/destroy inside systems
 - [ ] Shared texture cache
 - [ ] Renderable component (layer, size, flags) and a `Hidden` tag
 - [ ] Modules: one function that registers a feature's components and systems
 - [ ] Runtime component registration
-- [ ] Command buffer for safe add/remove during iteration
-- [x] Entity handles with generations to detect stale handles
 - [ ] Event bus
 - [ ] Multithreaded systems
 - [ ] Demo and benchmark
