@@ -2,6 +2,7 @@
 #define system_handler_H
 
 #include <stdbool.h>
+#include "event_bus.h"
 //forward declared to avoid a circular include, World.h includes this header
 typedef struct World World;
 
@@ -43,6 +44,7 @@ typedef struct SystemRegistry {
     int size;
     int n;
     bool initialized;
+    EventBus *events;   //this World's events, systems talk to each other through it
 } SystemRegistry;
 
 

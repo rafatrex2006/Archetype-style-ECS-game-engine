@@ -9,9 +9,9 @@ World *createWorld(int size, int EntSize, metadata *meta, SDL_Window *window){
     W->ArcTable = createArcTable(size, EntSize, W->ArcArray); //maybe remove arr later
     W->entities = CreateEntityTable(EntSize);
     W->QueryArr = CreateQueryArr(size);
+    W->metadata = meta;     //before the registry, its event bus reads the event sizes
     W->systems = createSystemRegistry(W, size);
     W->command_buffer = CreateCMDArray(size);
-    W->metadata = meta;
     W->window = window;
 
     //system's flag

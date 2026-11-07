@@ -2,6 +2,13 @@
 #include <stdlib.h>
 #include <stdalign.h>
 
+//events
+#include "events/damage.h"
+
+void assign_new_event(metadata *M, size_t size, EventType id){
+    M->event_sizes[id] = size;
+}
+
 void assign_new_component(metadata *M, size_t size, Component id, size_t alignment, void (*constructor)(void *), void (*destructor)(void *), void (*move)(void *, void *)){
     M->sizes[id] = size;
     M->alignment[id] = alignment;
@@ -16,6 +23,7 @@ void freeMetadata(metadata *meta){
     free(meta->constructor);
     free(meta->destructor);
     free(meta->move);
+    free(meta->event_sizes);
     free(meta);
 }
 
@@ -42,6 +50,10 @@ metadata *createMetadata(int n){
     assign_new_component(M, sizeof(Acceleration), ACCELERATION, alignof(Acceleration), createAcceleration, NULL, NULL);
     assign_new_component(M, sizeof(Shape), SHAPE, alignof(Shape), createShape, NULL, NULL);
     assign_new_component(M, sizeof(Surface), SURFACE, alignof(Surface), createSurface, NULL, NULL);
+
+    //events -- assign_new_event(metadata *M, size_t size, EventType id)
+    M->event_sizes = calloc(EVENT_COUNT, sizeof(size_t));
+    assign_new_event(M, sizeof(Damage), EVT_DAMAGE);
 
     
 

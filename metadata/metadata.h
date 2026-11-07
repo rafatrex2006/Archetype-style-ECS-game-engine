@@ -24,6 +24,14 @@ typedef enum Component {
     COMPONENT_COUNT
 } Component;
 
+//one id per event type, register each one in createMetadata
+//the event structs are included in metadata.c, not here: they use entity, and components.h includes this header
+typedef enum EventType {
+    EVT_DAMAGE = 0,
+
+    EVENT_COUNT
+} EventType;
+
 typedef struct metadata{
     //Component *id;
     size_t *sizes;
@@ -32,10 +40,14 @@ typedef struct metadata{
     void (**constructor)(void *);
     void (**destructor)(void *);
     void (**move)(void *dst, void *src);
+
+    size_t *event_sizes;
 } metadata;
 
 
 void assign_new_component(metadata *M, size_t size, Component id, size_t alignment, void (*constructor)(void *), void (*destructor)(void *), void (*move)(void *, void *));
+
+void assign_new_event(metadata *M, size_t size, EventType id);
 
 metadata *createMetadata(int n);
 

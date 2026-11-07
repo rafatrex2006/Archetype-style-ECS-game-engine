@@ -14,6 +14,7 @@ SystemRegistry *createSystemRegistry(World *W, int size){
     R->size = size;
     R->n = 0;
     R->initialized = false;
+    R->events = createEventBus(W->metadata);
     return R;
 }
 
@@ -34,6 +35,7 @@ void freeSystemRegistry(SystemRegistry *R){
             free(s->state);
         }
     }
+    freeEventBus(R->events);   //after the systems, destroy may still send or read events
     free(R->systems);
     free(R);
 }
@@ -102,6 +104,7 @@ bool systems_init(SystemRegistry *R){
 }
 
 void systems_run(SystemRegistry *R, float dt){
+    event_bus_swap(R->events);  //new frame: drop events older than last frame
     for(int phase = 0; phase < PHASE_COUNT; phase++){
         R->W->in_systems = true;
         for(int i = 0; i < R->n; i++){

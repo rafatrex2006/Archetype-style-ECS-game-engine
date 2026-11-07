@@ -10,6 +10,7 @@
 #include "components/acceleration.h"
 #include "metadata/metadata.h"
 #include "systems/movement.h"
+#include "events/damage.h"
 
 static int failures = 0;
 #define CHECK(cond) do { if(!(cond)){ printf("  FAIL line %d: %s\n", __LINE__, #cond); failures++; } } while(0)
@@ -784,6 +785,139 @@ static void test_movement_systems(void){
     freeWorld(W); freeMetadata(m);
 }
 
+/* ---------- events ---------- */
+
+static void test_events_basic(void){
+    printf("events: read in order, once, readers only see what came after them\n");
+    metadata *m = createMetadata(64);
+    World *W = createWorld(20, 4, m, NULL);
+    entity e = CreateEntity(W);
+
+    EventReader before = event_reader(W, EVT_DAMAGE);
+    for(int i = 0; i < 100; i++){                /* past the first 16, forces growth */
+        emit_event(W, EVT_DAMAGE, &(Damage){ e, i });
+    }
+    EventReader after = event_reader(W, EVT_DAMAGE);
+
+    const Damage *d;
+    int n = 0, in_order = 1;
+    while((d = read_event(W, EVT_DAMAGE, &before))){
+        if(d->amount != n || d->target.index != e.index) in_order = 0;
+        n++;
+    }
+    CHECK(n == 100);
+    CHECK(in_order);
+    CHECK(read_event(W, EVT_DAMAGE, &before) == NULL);   /* nothing is read twice */
+    CHECK(read_event(W, EVT_DAMAGE, &after) == NULL);    /* sent before this reader existed */
+
+    emit_event(W, EVT_DAMAGE, NULL);             /* NULL sends a zeroed event */
+    d = read_event(W, EVT_DAMAGE, &after);
+    CHECK(d && d->amount == 0);
+
+    CHECK(read_event(W, EVENT_COUNT, &after) == NULL);   /* bad type: error, no crash */
+    emit_event(W, EVENT_COUNT, NULL);
+
+    freeWorld(W); freeMetadata(m);
+}
+
+static void test_events_lifetime(void){
+    printf("events: live for their frame and the next one, then are dropped\n");
+    metadata *m = createMetadata(64);
+    World *W = createWorld(20, 4, m, NULL);
+    world_init_systems(W);
+
+    EventReader every_frame = event_reader(W, EVT_DAMAGE);
+    EventReader late = event_reader(W, EVT_DAMAGE);
+
+    emit_event(W, EVT_DAMAGE, &(Damage){ .amount = 1 });
+    UpdateWorld(W, 0.0f);                        /* frame 1: event is now "last frame" */
+    const Damage *d = read_event(W, EVT_DAMAGE, &every_frame);
+    CHECK(d && d->amount == 1);
+
+    emit_event(W, EVT_DAMAGE, &(Damage){ .amount = 2 });
+    UpdateWorld(W, 0.0f);                        /* frame 2: amount 1 is dropped */
+    d = read_event(W, EVT_DAMAGE, &every_frame);
+    CHECK(d && d->amount == 2);
+
+    d = read_event(W, EVT_DAMAGE, &late);        /* skipped ahead past the dropped event */
+    CHECK(d && d->amount == 2);
+    CHECK(read_event(W, EVT_DAMAGE, &late) == NULL);
+
+    UpdateWorld(W, 0.0f);
+    UpdateWorld(W, 0.0f);
+    EventReader from_zero = { 0 };
+    CHECK(read_event(W, EVT_DAMAGE, &from_zero) == NULL);    /* everything is gone */
+
+    freeWorld(W); freeMetadata(m);
+}
+
+/* the sender runs in POST_UPDATE, after the UPDATE reader and before the RENDER reader */
+typedef struct EventProbe { EventReader r; int got[8]; int n; } EventProbe;
+static EventProbe *early_probe, *late_probe;
+static int send_amounts[8], send_n;
+
+static bool event_probe_init(World *W, void **state){
+    EventProbe *p = calloc(1, sizeof(EventProbe));
+    p->r = event_reader(W, EVT_DAMAGE);
+    *state = p;
+    return true;
+}
+static void event_probe_update(World *W, float dt, void *state){
+    (void)dt;
+    EventProbe *p = state;
+    p->n = 0;                                    /* what it read this frame */
+    const Damage *d;
+    while((d = read_event(W, EVT_DAMAGE, &p->r))){
+        if(p->n < 8) p->got[p->n++] = d->amount;
+    }
+}
+static bool early_init(World *W, void **state){ bool ok = event_probe_init(W, state); early_probe = *state; return ok; }
+static bool late_init(World *W, void **state){ bool ok = event_probe_init(W, state); late_probe = *state; return ok; }
+static void sender_update(World *W, float dt, void *state){
+    (void)dt; (void)state;
+    for(int i = 0; i < send_n; i++) emit_event(W, EVT_DAMAGE, &(Damage){ .amount = send_amounts[i] });
+}
+
+static void test_events_between_systems(void){
+    printf("events: every reader sees every event once, whatever phase it is in\n");
+    metadata *m = createMetadata(64);
+    World *W = createWorld(20, 4, m, NULL);
+    register_system_world(W, &(SystemDesc){ .name = "early", .phase = PHASE_UPDATE, .init = early_init, .update = event_probe_update });
+    register_system_world(W, &(SystemDesc){ .name = "sender", .phase = PHASE_POST_UPDATE, .update = sender_update });
+    register_system_world(W, &(SystemDesc){ .name = "late", .phase = PHASE_RENDER, .init = late_init, .update = event_probe_update });
+    world_init_systems(W);
+
+    send_n = 2; send_amounts[0] = 1; send_amounts[1] = 2;
+    UpdateWorld(W, 0.0f);
+    CHECK(early_probe->n == 0);                  /* ran before anything was sent */
+    CHECK(late_probe->n == 2 && late_probe->got[0] == 1 && late_probe->got[1] == 2);
+
+    send_n = 1; send_amounts[0] = 3;
+    UpdateWorld(W, 0.0f);
+    CHECK(early_probe->n == 2 && early_probe->got[0] == 1 && early_probe->got[1] == 2);   /* last frame's */
+    CHECK(late_probe->n == 1 && late_probe->got[0] == 3);
+
+    send_n = 0;
+    UpdateWorld(W, 0.0f);
+    CHECK(early_probe->n == 1 && early_probe->got[0] == 3);
+    CHECK(late_probe->n == 0);
+
+    freeWorld(W); freeMetadata(m);
+}
+
+static void test_events_per_world(void){
+    printf("events: each World has its own events\n");
+    metadata *m = createMetadata(64);
+    World *A = createWorld(20, 4, m, NULL);
+    World *B = createWorld(20, 4, m, NULL);
+    EventReader rb = event_reader(B, EVT_DAMAGE);
+
+    emit_event(A, EVT_DAMAGE, &(Damage){ .amount = 7 });
+    CHECK(read_event(B, EVT_DAMAGE, &rb) == NULL);
+
+    freeWorld(A); freeWorld(B); freeMetadata(m);
+}
+
 int main(void){
     test_add_remove();
     test_swap_remove_keeps_indices();
@@ -808,6 +942,11 @@ int main(void){
     test_cmd_add_during_iteration();
     test_cmd_visible_next_phase();
     test_cmd_destroy_then_change();
+
+    test_events_basic();
+    test_events_lifetime();
+    test_events_between_systems();
+    test_events_per_world();
 
     if(failures){ printf("\n%d check(s) FAILED\n", failures); return 1; }
     printf("\nall tests passed\n");
