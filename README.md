@@ -2,7 +2,7 @@
 
 An archetype-based Entity Component System (ECS) in C, built from scratch as a learning project and meant to become the core of a small game engine. SDL3 handles the window and rendering.
 
-> **Status: early development.** The ECS core, safe entity handles, the system scheduler with its command buffer, and a basic renderer (shapes and PNG images) work and are tested.
+> **Status: early development.** The ECS core, safe entity handles, the system scheduler with its command buffer, events, and a basic renderer (shapes and PNG images) work and are tested.
 
 ## Features
 
@@ -12,6 +12,7 @@ An archetype-based Entity Component System (ECS) in C, built from scratch as a l
 - **Safe entity handles:** an `entity` is a small value (slot + generation). Once the entity dies, every copy of its handle is detected as stale and ignored, so it can't crash or touch a different entity.
 - **Systems:** functions that run every frame, in phases, owned by the `World`.
 - **Safe changes during iteration:** adding, removing or destroying inside a system is queued and applied after the phase, so loops over queries never skip or repeat entities.
+- **Events:** systems send and read typed events without knowing about each other.
 - **Renderer:** draws entities that have a `Transform` plus a `Shape` or a `Surface` (image).
 - **No global state:** everything lives in a `World`.
 
@@ -86,6 +87,27 @@ Call `add_component`, `remove_component` and `DestroyEnt` as usual. While system
 - `CreateEntity` is not queued: it returns a usable handle immediately. The new entity has no components yet, so no query sees it until its queued components are added.
 - Outside systems (setup code, `main`), every change applies immediately.
 
+## Events
+
+Systems talk to each other through events: small structs sent to the World, which any system can read. The sender doesn't know who reads them. Each World has its own events, so a World never sees another World's events.
+
+```c
+// in the system's init: a reader starts at "now" and keeps its own place
+self->damage = event_reader(W, EVT_DAMAGE);
+
+// anywhere: the event is copied
+emit_event(W, EVT_DAMAGE, &(Damage){ .target = e, .amount = 10 });
+
+// in update: every reader sees every event once, in the order they were sent
+const Damage *d;
+while ((d = read_event(W, EVT_DAMAGE, &self->damage))) { ... }
+```
+
+- An event lives for the frame it was sent in and the next one, then it is dropped. That way every reader gets it once, whether its phase runs before or after the sender's.
+- A reader that doesn't read for 2 or more frames skips the events it missed.
+- Events must be plain data with no pointers to memory they own, because they are dropped without any cleanup.
+- The pointer `read_event` returns is valid until the next `emit_event` of the same type. If a system sends the type it is reading, it should copy the event first, and it will also read the events it sends.
+
 ## Rendering
 
 The renderer is a system in the `RENDER` phase. Each frame it clears the screen, draws shapes, draws images on top, and presents.
@@ -107,16 +129,23 @@ SDL_DestroySurface(img);
 2. Add its id to the `Component` enum in `metadata/metadata.h` (before `COMPONENT_COUNT`) and include its header there.
 3. Register it in `createMetadata` in `metadata/metadata.c`.
 
+## Adding an event
+
+1. Write the struct in `events/`. No constructor is needed.
+2. Add its id to the `EventType` enum in `metadata/metadata.h` (before `EVENT_COUNT`).
+3. Include its header in `metadata/metadata.c` and register it in `createMetadata` with `assign_new_event`.
+
 ## Project layout
 
 ```
 data_structures/   World, archetypes, hash table, queries, entity table
-metadata/          Component enum and component registration
-System_Handler/    system registry, phase scheduler and command buffer
+metadata/          Component and event enums, their registration
+System_Handler/    system registry, phase scheduler, command buffer and events
 systems/           example systems: accelerate and move
 components/        Transform, Velocity, Acceleration, Health, Shape, Surface
+events/            Damage (example event)
 renderer/          render system
-tests/             test_ecs.c: ECS core, entity handle, scheduler and command buffer tests
+tests/             test_ecs.c: ECS core, entity handle, scheduler, command buffer and event tests
 main.c             window, World and main loop
 ```
 
@@ -140,7 +169,7 @@ main.c             window, World and main loop
 - [ ] Renderable component (layer, size, flags) and a `Hidden` tag
 - [ ] Modules: one function that registers a feature's components and systems
 - [ ] Runtime component registration
-- [ ] Event bus
+- [x] Event bus
 - [ ] Multithreaded systems
 - [ ] Demo and benchmark
 
