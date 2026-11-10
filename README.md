@@ -29,11 +29,15 @@ make test   # runs the tests with AddressSanitizer and UBSan
 
 ```c
 metadata *m = createMetadata(64);
-World *W = createWorld(20, 100, m, window);   // window can be NULL if nothing is drawn
+World *W = createWorld(20, 100, m);
 
 // systems
 register_system_world(W, &ACCELERATE_SYSTEM);
 register_system_world(W, &MOVE_SYSTEM);
+register_system_world(W, &(SystemDesc){                          // the renderer gets the window as its config
+    .name = "renderer", .phase = PHASE_RENDER, .config = window,
+    .init = FRX_CreateRenderer, .update = FRX_UpdateRenderer, .destroy = FRX_DestroyRenderer,
+});
 
 // entities
 entity box = CreateEntity(W);                                    // a handle, copy it freely
@@ -66,7 +70,8 @@ A system is described by a `SystemDesc`:
 |---|---|
 | `name` | Shown in error messages. |
 | `phase` | `PHASE_PRE_UPDATE`, `PHASE_UPDATE`, `PHASE_POST_UPDATE` or `PHASE_RENDER`. Phases run in that order, and systems in the same phase run in registration order. |
-| `init` | Optional. `bool init(World *W, void **state)` sets up the system's state (usually its queries) and returns `false` if the system can't start. |
+| `config` | Optional. A pointer handed to `init` as is, for settings or things the system needs from outside, like the renderer's window. The system doesn't own it, so whoever made it must keep it alive and free it. |
+| `init` | Optional. `bool init(World *W, void *config, void **state)` sets up the system's state (usually its queries) and returns `false` if the system can't start. |
 | `update` | `void update(World *W, float dt, void *state)` runs every frame. |
 | `destroy` | Optional. Frees the state. If left out, `free(state)` is called. |
 

@@ -48,8 +48,9 @@ static void DoubleSystemSize(SystemRegistry *R){
 //works by index, init may register more systems and realloc R->systems under us
 static bool InitSystem(SystemRegistry *R, int id){
     SystemInitFn init = R->systems[id].desc.init;
+    void *config = R->systems[id].desc.config;
     void *state = NULL;
-    bool ok = init ? init(R->W, &state) : true;
+    bool ok = init ? init(R->W, config, &state) : true;
 
     System *s = &R->systems[id];
     if(!ok){

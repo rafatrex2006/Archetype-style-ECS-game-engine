@@ -18,7 +18,8 @@ typedef enum SystemPhase {
 
 //init mallocs the system's own state (queries, settings, subscribers...) and writes it to *state, leave it NULL for stateless systems
 //returns false if the system could not start, it must clean up after itself then, destroy is not called for it
-typedef bool (*SystemInitFn)(World *W, void **state);
+//config is SystemDesc.config, given as is: the system can read it but does not own it
+typedef bool (*SystemInitFn)(World *W, void *config, void **state);
 typedef void (*SystemUpdateFn)(World *W, float dt, void *state);
 //frees whatever init created, if NULL the registry just calls free(state)
 typedef void (*SystemDestroyFn)(World *W, void *state);
@@ -26,6 +27,7 @@ typedef void (*SystemDestroyFn)(World *W, void *state);
 typedef struct SystemDesc {
     const char *name;
     SystemPhase phase;
+    void *config;               //optional, passed to init (a window, settings...), the system does not own it
     SystemInitFn init;          //optional
     SystemUpdateFn update;
     SystemDestroyFn destroy;    //optional

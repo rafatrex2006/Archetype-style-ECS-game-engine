@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-World *createWorld(int size, int EntSize, metadata *meta, SDL_Window *window){
+World *createWorld(int size, int EntSize, metadata *meta){
     World *W = (World*)malloc(sizeof(World));
     W->ArcArray = CreateArcArray(size);
     W->ArcTable = createArcTable(size, EntSize, W->ArcArray); //maybe remove arr later
@@ -12,7 +12,6 @@ World *createWorld(int size, int EntSize, metadata *meta, SDL_Window *window){
     W->metadata = meta;     //before the registry, its event bus reads the event sizes
     W->systems = createSystemRegistry(W, size);
     W->command_buffer = CreateCMDArray(size);
-    W->window = window;
 
     //system's flag
     W->in_systems = false;

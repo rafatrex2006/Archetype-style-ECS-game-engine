@@ -21,7 +21,8 @@ static bool CreateQueryState(World *W, void **state, Component a, Component b){
     return true;
 }
 
-bool accelerate_init(World *W, void **state){
+bool accelerate_init(World *W, void *config, void **state){
+    (void)config;
     return CreateQueryState(W, state, VELOCITY, ACCELERATION);
 }
 
@@ -43,7 +44,8 @@ void accelerate_update(World *W, float dt, void *state){
     }
 }
 
-bool move_init(World *W, void **state){
+bool move_init(World *W, void *config, void **state){
+    (void)config;
     return CreateQueryState(W, state, TRANSFORM, VELOCITY);
 }
 

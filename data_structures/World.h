@@ -8,7 +8,6 @@
 #include "queries.h"
 #include "entity_table.h"
 #include "System_Handler/cmd_array.h"
-#include <SDL3/SDL.h>
 
 typedef struct World{
     archetype_array *ArcArray;
@@ -18,13 +17,12 @@ typedef struct World{
     metadata *metadata;
     SystemRegistry *systems;
     cmd_array *command_buffer;
-    SDL_Window *window;
 
     //system's flag
     bool in_systems;
 } World;
 
-World *createWorld(int size, int EntSize, metadata *meta, SDL_Window *window);
+World *createWorld(int size, int EntSize, metadata *meta);
 
 void freeWorld(World *W);
 

@@ -48,7 +48,7 @@ static int badRows(World *W){
 static void test_add_remove(void){
     printf("add/remove component\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     Transform t = {1.0f, 2.0f};
 
     entity e = CreateEntity(W);
@@ -81,7 +81,7 @@ static void test_add_remove(void){
 static void test_swap_remove_keeps_indices(void){
     printf("swap-remove keeps entity indices consistent\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     enum { N = 50 };
     entity ents[N];
     for(int i = 0; i < N; i++){
@@ -107,7 +107,7 @@ static void test_destructors(void){
     printf("destructors run exactly once per destroyed component\n");
     metadata *m = createMetadata(64);
     assign_new_component(m, sizeof(Health), HEALTH, alignof(Health), createHealth, countDestroy, NULL);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     destroyed = 0;
 
     entity a = CreateEntity(W), b = CreateEntity(W), c = CreateEntity(W);
@@ -128,7 +128,7 @@ static void test_destructors(void){
 static void test_growth_and_queries(void){
     printf("archetype growth (5000 entities) and cached queries\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);   /* tiny initial capacity forces many reallocations */
+    World *W = createWorld(20, 4, m);   /* tiny initial capacity forces many reallocations */
 
     Component in[]  = { TRANSFORM, VELOCITY };
     Component out[] = { HEALTH };
@@ -159,7 +159,7 @@ static void test_stale_handles(void){
     printf("stale handles are detected and ignored\n");
     metadata *m = createMetadata(64);
     assign_new_component(m, sizeof(Health), HEALTH, alignof(Health), createHealth, countDestroy, NULL);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     destroyed = 0;
 
     entity a = CreateEntity(W);
@@ -206,7 +206,7 @@ static void test_stale_handles(void){
 static void test_moved_rows_follow(void){
     printf("entities moved by swap-remove keep working through their handles\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
 
     /* three entities in the same archetype; moving out the first one swaps the last into its row */
     entity e[3];
@@ -230,7 +230,7 @@ static void test_moved_rows_follow(void){
 static void test_slot_reuse_and_growth(void){
     printf("entity table reuses slots and grows past its start size\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);      /* table starts with 4 slots */
+    World *W = createWorld(20, 4, m);      /* table starts with 4 slots */
 
     /* spawn and kill 10,000 entities, never more than 10 alive: the table stays at 10 slots */
     entity alive[10];
@@ -280,7 +280,7 @@ static void reset_probes(void){
     last_dt = -1.0f;
 }
 
-static bool probe_init(World *W, void **state){
+static bool probe_init(World *W, void *config, void **state){ (void)config;
     (void)W;
     Probe *p = malloc(sizeof(Probe));
     p->id = next_id++;
@@ -310,7 +310,7 @@ static void noop_update(World *W, float dt, void *state){ (void)W; (void)dt; (vo
 static void test_register_validation(void){
     printf("register_system_world rejects bad systems and returns ids\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     reset_probes();
 
     CHECK(register_system_world(W, NULL) == -1);
@@ -330,7 +330,7 @@ static void test_register_validation(void){
 static void test_init_timing(void){
     printf("init runs at world_init_systems, once, and right away after that\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     reset_probes();
 
     add_probe(W, PHASE_UPDATE);
@@ -353,10 +353,40 @@ static void test_init_timing(void){
     freeWorld(W); freeMetadata(m);
 }
 
+/* records the config each init receives */
+static void *config_log[4];
+static int config_n;
+static bool config_init(World *W, void *config, void **state){
+    (void)W; (void)state;
+    if(config_n < 4) config_log[config_n++] = config;
+    return true;
+}
+
+static void test_system_config(void){
+    printf("SystemDesc.config reaches init unchanged, NULL when not set\n");
+    metadata *m = createMetadata(64);
+    World *W = createWorld(20, 4, m);
+    config_n = 0;
+    int gravity = 10, speed = 3;
+
+    register_system_world(W, &(SystemDesc){ .name = "a", .phase = PHASE_UPDATE, .config = &gravity, .init = config_init, .update = noop_update });
+    register_system_world(W, &(SystemDesc){ .name = "b", .phase = PHASE_UPDATE, .init = config_init, .update = noop_update });
+    world_init_systems(W);
+    register_system_world(W, &(SystemDesc){ .name = "late", .phase = PHASE_UPDATE, .config = &speed, .init = config_init, .update = noop_update });
+
+    CHECK(config_n == 3);
+    CHECK(config_log[0] == &gravity);
+    CHECK(config_log[1] == NULL);
+    CHECK(config_log[2] == &speed);              /* late registration too */
+    UpdateWorld(W, 0.0f);
+
+    freeWorld(W); freeMetadata(m);
+}
+
 static void test_phase_order(void){
     printf("phases run in order, registration order inside a phase\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     reset_probes();
 
     /* registered out of phase order on purpose, ids are 0..4 in this order */
@@ -382,7 +412,7 @@ static void test_phase_order(void){
 static void test_enable_disable(void){
     printf("disabled systems are skipped\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     reset_probes();
 
     int a = add_probe(W, PHASE_UPDATE);
@@ -408,7 +438,7 @@ static void test_enable_disable(void){
 /* destroy reads the World to prove freeWorld tears systems down before the ECS data,
    ASan reports a use-after-free if that order ever flips */
 static int queries_seen_in_destroy;
-static bool query_init(World *W, void **state){
+static bool query_init(World *W, void *config, void **state){ (void)config;
     (void)state;
     createCustomQueue(W, (Component[]){ TRANSFORM }, 1, NULL, 0);
     return true;
@@ -418,12 +448,12 @@ static void query_destroy(World *W, void *state){
     queries_seen_in_destroy = W->QueryArr->n;
 }
 
-static bool plain_init(World *W, void **state){ (void)W; *state = malloc(32); return true; }   /* no destroy: registry must free() it */
+static bool plain_init(World *W, void *config, void **state){ (void)config; (void)W; *state = malloc(32); return true; }   /* no destroy: registry must free() it */
 
 static void test_destroy(void){
     printf("freeWorld destroys systems in reverse order, before the ECS data\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     reset_probes();
     queries_seen_in_destroy = -1;
 
@@ -444,7 +474,7 @@ static void test_destroy(void){
 
 /* fails to start: the registry must never run or destroy it */
 static int broken_updates, broken_destroys;
-static bool broken_init(World *W, void **state){ (void)W; (void)state; return false; }
+static bool broken_init(World *W, void *config, void **state){ (void)config; (void)W; (void)state; return false; }
 static void broken_update(World *W, float dt, void *state){ (void)W; (void)dt; (void)state; broken_updates++; }
 static void broken_destroy(World *W, void *state){ (void)W; (void)state; broken_destroys++; }
 
@@ -455,7 +485,7 @@ static int add_broken(World *W){
 static void test_init_failure(void){
     printf("a failed init disables only that system and is reported\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     reset_probes();
     broken_updates = broken_destroys = 0;
 
@@ -482,7 +512,7 @@ static void test_init_failure(void){
     freeMetadata(m);
 
     /* all systems fine: true */
-    W = createWorld(20, 4, m = createMetadata(64), NULL);
+    W = createWorld(20, 4, m = createMetadata(64));
     add_probe(W, PHASE_UPDATE);
     CHECK(world_init_systems(W) == true);
     freeWorld(W); freeMetadata(m);
@@ -491,7 +521,7 @@ static void test_init_failure(void){
 static void test_registry_growth(void){
     printf("registry grows past its initial size\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(2, 4, m, NULL);       /* registry starts with room for 2 systems */
+    World *W = createWorld(2, 4, m);       /* registry starts with room for 2 systems */
     reset_probes();
 
     enum { N = 40 };
@@ -517,7 +547,7 @@ static void test_same_frame_double_destroy(void){
     printf("two systems destroying the same entity in one frame\n");
     metadata *m = createMetadata(64);
     assign_new_component(m, sizeof(Health), HEALTH, alignof(Health), createHealth, countDestroy, NULL);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     destroyed = 0;
 
     entity enemy = CreateEntity(W);
@@ -578,7 +608,7 @@ static void test_cmd_destroy_during_iteration(void){
     printf("command buffer: destroying while iterating visits every entity\n");
     metadata *m = createMetadata(64);
     assign_new_component(m, sizeof(Health), HEALTH, alignof(Health), createHealth, countDestroy, NULL);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     destroyed = visits = still_alive_in_loop = 0;
 
     enum { N = 50 };
@@ -622,7 +652,7 @@ static void add_velocity_update(World *W, float dt, void *state){
 static void test_cmd_add_during_iteration(void){
     printf("command buffer: adding while iterating, data copied, buffers grow\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);      /* 20 commands and 200 data bytes to start */
+    World *W = createWorld(20, 4, m);      /* 20 commands and 200 data bytes to start */
     visits = 0;
 
     enum { N = 300 };                            /* 300 commands, 2400 data bytes: both buffers must grow */
@@ -670,7 +700,7 @@ static void look_for_health_update(World *W, float dt, void *state){
 static void test_cmd_visible_next_phase(void){
     printf("command buffer: changes show up in the next phase\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     seen_same_phase = seen_next_phase = -1;
 
     phase_target = CreateEntity(W);
@@ -707,7 +737,7 @@ static void test_cmd_destroy_then_change(void){
     printf("command buffer: destroy mixed with other commands for the same entity\n");
     metadata *m = createMetadata(64);
     assign_new_component(m, sizeof(Health), HEALTH, alignof(Health), createHealth, countDestroy, NULL);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     destroyed = 0;
 
     mixed_target = CreateEntity(W);
@@ -736,7 +766,7 @@ static void test_cmd_destroy_then_change(void){
 static void test_movement_systems(void){
     printf("accelerate + move systems update components through UpdateWorld\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
 
     /* registered move first: accelerate still runs first because PRE_UPDATE comes before UPDATE */
     register_system_world(W, &MOVE_SYSTEM);
@@ -790,7 +820,7 @@ static void test_movement_systems(void){
 static void test_events_basic(void){
     printf("events: read in order, once, readers only see what came after them\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     entity e = CreateEntity(W);
 
     EventReader before = event_reader(W, EVT_DAMAGE);
@@ -823,7 +853,7 @@ static void test_events_basic(void){
 static void test_events_lifetime(void){
     printf("events: live for their frame and the next one, then are dropped\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     world_init_systems(W);
 
     EventReader every_frame = event_reader(W, EVT_DAMAGE);
@@ -856,7 +886,7 @@ typedef struct EventProbe { EventReader r; int got[8]; int n; } EventProbe;
 static EventProbe *early_probe, *late_probe;
 static int send_amounts[8], send_n;
 
-static bool event_probe_init(World *W, void **state){
+static bool event_probe_init(World *W, void *config, void **state){ (void)config;
     EventProbe *p = calloc(1, sizeof(EventProbe));
     p->r = event_reader(W, EVT_DAMAGE);
     *state = p;
@@ -871,8 +901,8 @@ static void event_probe_update(World *W, float dt, void *state){
         if(p->n < 8) p->got[p->n++] = d->amount;
     }
 }
-static bool early_init(World *W, void **state){ bool ok = event_probe_init(W, state); early_probe = *state; return ok; }
-static bool late_init(World *W, void **state){ bool ok = event_probe_init(W, state); late_probe = *state; return ok; }
+static bool early_init(World *W, void *config, void **state){ (void)config; bool ok = event_probe_init(W, config, state); early_probe = *state; return ok; }
+static bool late_init(World *W, void *config, void **state){ (void)config; bool ok = event_probe_init(W, config, state); late_probe = *state; return ok; }
 static void sender_update(World *W, float dt, void *state){
     (void)dt; (void)state;
     for(int i = 0; i < send_n; i++) emit_event(W, EVT_DAMAGE, &(Damage){ .amount = send_amounts[i] });
@@ -881,7 +911,7 @@ static void sender_update(World *W, float dt, void *state){
 static void test_events_between_systems(void){
     printf("events: every reader sees every event once, whatever phase it is in\n");
     metadata *m = createMetadata(64);
-    World *W = createWorld(20, 4, m, NULL);
+    World *W = createWorld(20, 4, m);
     register_system_world(W, &(SystemDesc){ .name = "early", .phase = PHASE_UPDATE, .init = early_init, .update = event_probe_update });
     register_system_world(W, &(SystemDesc){ .name = "sender", .phase = PHASE_POST_UPDATE, .update = sender_update });
     register_system_world(W, &(SystemDesc){ .name = "late", .phase = PHASE_RENDER, .init = late_init, .update = event_probe_update });
@@ -908,8 +938,8 @@ static void test_events_between_systems(void){
 static void test_events_per_world(void){
     printf("events: each World has its own events\n");
     metadata *m = createMetadata(64);
-    World *A = createWorld(20, 4, m, NULL);
-    World *B = createWorld(20, 4, m, NULL);
+    World *A = createWorld(20, 4, m);
+    World *B = createWorld(20, 4, m);
     EventReader rb = event_reader(B, EVT_DAMAGE);
 
     emit_event(A, EVT_DAMAGE, &(Damage){ .amount = 7 });
@@ -930,6 +960,7 @@ int main(void){
 
     test_register_validation();
     test_init_timing();
+    test_system_config();
     test_phase_order();
     test_enable_disable();
     test_destroy();

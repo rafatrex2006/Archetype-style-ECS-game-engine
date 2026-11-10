@@ -6,9 +6,15 @@
 //column index = number of component bits below this one
 #define COLUMN(arc, comp) ((arc)->data[__builtin_popcountll((arc)->sig & ((1ULL << (comp)) - 1))].data)
 
-bool FRX_CreateRenderer(World *W, void **state){
+bool FRX_CreateRenderer(World *W, void *config, void **state){
+    //the window comes in as the system's config, main owns it and must destroy it after freeWorld
+    SDL_Window *window = (SDL_Window*)config;
+    if (!window) {
+        SDL_Log("Renderer failed: no window, pass it as .config when registering the system");
+        return false;
+    }
 
-    SDL_Renderer *renderer = SDL_CreateRenderer(W->window, NULL);
+    SDL_Renderer *renderer = SDL_CreateRenderer(window, NULL);
 
     //main owns the window, so only report the error here
     if (!renderer) {
@@ -21,7 +27,7 @@ bool FRX_CreateRenderer(World *W, void **state){
         SDL_DestroyRenderer(renderer);
         return false;
     }
-    rd->window = W->window;
+    rd->window = window;
     rd->renderer = renderer;
     rd->query[QUERY_SHAPE] = createCustomQueue(W, (Component[]){TRANSFORM, SHAPE}, 2, NULL, 0);
     rd->query[QUERY_SURFACE] = createCustomQueue(W, (Component[]){TRANSFORM, SURFACE}, 2, NULL, 0);

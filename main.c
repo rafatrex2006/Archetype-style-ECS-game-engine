@@ -23,8 +23,8 @@ int main(int argc, char *argv[])
     }
 
     metadata *meta = createMetadata(64);
-    World *World = createWorld(20, 100, meta, window);
-    register_system_world(World, &(SystemDesc){.name    = "renderer", .phase   = PHASE_RENDER, .init    = FRX_CreateRenderer, .update  = FRX_UpdateRenderer, .destroy = FRX_DestroyRenderer});
+    World *World = createWorld(20, 100, meta);
+    register_system_world(World, &(SystemDesc){.name    = "renderer", .phase   = PHASE_RENDER, .config  = window, .init    = FRX_CreateRenderer, .update  = FRX_UpdateRenderer, .destroy = FRX_DestroyRenderer});
     
     SDL_Surface *fade = SDL_LoadPNG("fade.png");
     if (!fade) {
